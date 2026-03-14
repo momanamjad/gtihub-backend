@@ -88,5 +88,17 @@ router.get('/search', async (req, res) => {
     res.json(users);
   } catch (err) { res.status(500).send('Server error'); }
 });
+// UPDATE PROFILE
+router.put('/profile', auth, async (req, res) => {
+  try {
+    const { name, bio, avatar_url } = req.body;
+    const user = await User.findById(req.user.id);
+    if (name) user.name = name;
+    if (bio) user.bio = bio;
+    if (avatar_url) user.avatar_url = avatar_url;
+    await user.save();
+    res.json(user);
+  } catch (err) { res.status(500).send('Server error'); }
+});
 
 export default router;
