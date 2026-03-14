@@ -1,9 +1,9 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
-import Repository from '../models/Repository.js';
-import Pin from '../models/Pin.js';
+import User from '../models/user.js';
+import Repository from '../models/repository.js';
+import Pin from '../models/pin.js';
 import auth from '../middleware/auth.js';
 
 const router = express.Router();

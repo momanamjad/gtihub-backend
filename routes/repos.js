@@ -1,7 +1,7 @@
 import express from 'express';
-import Repository from '../models/Repository.js';
-import Star from '../models/Star.js';
-import Pin from '../models/Pin.js';
+import Repository from '../models/repository.js';
+import Star from '../models/star.js';
+import Pin from '../models/pin.js';
 import auth from '../middleware/auth.js';
 
 const router = express.Router();
