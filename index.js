@@ -92,11 +92,15 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-if (process.env.NODE_ENV !== 'test') {
+
+// Only listen if not in Vercel environment
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`📚 API Docs available at http://localhost:${PORT}/api/docs`);
   });
+} else if (process.env.VERCEL) {
+  console.log('✅ Running on Vercel');
 }
 
 export default app;
