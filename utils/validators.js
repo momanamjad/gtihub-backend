@@ -1,0 +1,49 @@
+import Joi from 'joi';
+
+export const registerValidator = Joi.object({
+  login: Joi.string().alphanum().min(3).max(30).required(),
+  email: Joi.string().email().required(),
+  password: Joi.string().min(6).max(30).required(),
+});
+
+export const loginValidator = Joi.object({
+  email: Joi.string().email().required(),
+  password: Joi.string().required(),
+});
+
+export const changePasswordValidator = Joi.object({
+  oldPassword: Joi.string().required(),
+  newPassword: Joi.string().min(6).max(30).required(),
+});
+
+export const updateProfileValidator = Joi.object({
+  name: Joi.string().max(50),
+  bio: Joi.string().max(200),
+  avatar_url: Joi.string().uri(),
+}).min(1);
+
+export const createRepoValidator = Joi.object({
+  name: Joi.string().min(1).max(100).required(),
+  description: Joi.string().max(500).allow(''),
+  language: Joi.string().max(50),
+  visibility: Joi.string().valid('public', 'private'),
+});
+
+export const updateRepoValidator = Joi.object({
+  name: Joi.string().min(1).max(100),
+  description: Joi.string().max(500),
+  language: Joi.string().max(50),
+  visibility: Joi.string().valid('public', 'private'),
+}).min(1);
+
+export const searchValidator = Joi.object({
+  q: Joi.string().min(1).max(100).required(),
+  page: Joi.number().min(1).default(1),
+  limit: Joi.number().min(1).max(100).default(10),
+});
+
+export const paginationValidator = Joi.object({
+  page: Joi.number().min(1).default(1),
+  limit: Joi.number().min(1).max(100).default(10),
+  sort: Joi.string().default('-created_at'),
+});

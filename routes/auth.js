@@ -1,104 +1,162 @@
 import express from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import User from '../models/user.js';
-import Repository from '../models/repository.js';
-import Pin from '../models/pin.js';
-import auth from '../middleware/auth.js';
+import { validateRequest, validateQuery } from '../utils/validate.js';
+import {
+  registerValidator,
+  loginValidator,
+  changePasswordValidator,
+  updateProfileValidator,
+  searchValidator,
+} from '../utils/validators.js';
+import { successResponse, paginatedResponse } from '../utils/responseFormatter.js';
+import { asyncHandler } from '../utils/errorHandler.js';
+import { auth } from '../middleware/auth.js';
+import * as authService from '../services/authService.js';
+import * as userService from '../services/userService.js';
 
 const router = express.Router();
 
-// REGISTER
-router.post('/register', async (req, res) => {
-  try {
-    const { login, email, password } = req.body;
-    let user = await User.findOne({ $or: [{ email }, { login }] });
-    if (user) return res.status(400).json({ message: "User already exists" });
+/**
+ * @swagger
+ * /auth/register:
+ *   post:
+ *     summary: Register a new user
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [login, email, password]
+ *             properties:
+ *               login: { type: string }
+ *               email: { type: string }
+ *               password: { type: string }
+ */
+router.post('/register', validateRequest(registerValidator), asyncHandler(async (req, res) => {
+  const { token, user } = await authService.register(req.validated);
+  successResponse(res, { token, user }, 'User registered successfully', 201);
+}));
 
-    user = new User({ login, email, password });
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(password, salt);
-    await user.save();
+/**
+ * @swagger
+ * /auth/login:
+ *   post:
+ *     summary: Login user
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string }
+ *               password: { type: string }
+ */
+router.post('/login', validateRequest(loginValidator), asyncHandler(async (req, res) => {
+  const { token, user } = await authService.login(req.validated);
+  successResponse(res, { token, user }, 'Login successful');
+}));
 
-    const payload = { user: { id: user.id } };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { login: user.login, email: user.email } });
-  } catch (err) { res.status(500).send('Server error'); }
-});
+/**
+ * @swagger
+ * /auth/me:
+ *   get:
+ *     summary: Get current user profile
+ *     tags: [Auth]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ */
+router.get('/me', auth, asyncHandler(async (req, res) => {
+  const user = await authService.getUserProfile(req.user.id);
+  successResponse(res, user);
+}));
 
-// LOGIN
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    let user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "Invalid Credentials" });
+/**
+ * @swagger
+ * /auth/user/{username}:
+ *   get:
+ *     summary: Get public user profile
+ *     tags: [Auth]
+ *     parameters:
+ *       - in: path
+ *         name: username
+ *         required: true
+ *         schema: { type: string }
+ */
+router.get('/user/:username', asyncHandler(async (req, res) => {
+  const { user, repos, pins } = await userService.getUserPublicProfile(req.params.username);
+  successResponse(res, { user, repos, pins });
+}));
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid Credentials" });
+/**
+ * @swagger
+ * /auth/change-password:
+ *   post:
+ *     summary: Change user password
+ *     tags: [Auth]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [oldPassword, newPassword]
+ *             properties:
+ *               oldPassword: { type: string }
+ *               newPassword: { type: string }
+ */
+router.post('/change-password', auth, validateRequest(changePasswordValidator), asyncHandler(async (req, res) => {
+  const result = await authService.changePassword(req.user.id, req.validated);
+  successResponse(res, result);
+}));
 
-    const payload = { user: { id: user.id } };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { login: user.login, email: user.email } });
-  } catch (err) { res.status(500).send('Server error'); }
-});
+/**
+ * @swagger
+ * /auth/search:
+ *   get:
+ *     summary: Search users
+ *     tags: [Auth]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: number, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: number, default: 10 }
+ */
+router.get('/search', validateQuery(searchValidator), asyncHandler(async (req, res) => {
+  const { users, total } = await userService.searchUsers(req.query);
+  paginatedResponse(res, users, req.query.page, req.query.limit, total, 'Users found');
+}));
 
-// GET ME
-router.get('/me', auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select('-password');
-    res.json(user);
-  } catch (err) { res.status(500).send('Server error'); }
-});
-
-// PUBLIC PROFILE
-router.get('/user/:username', async (req, res) => {
-  try {
-    const user = await User.findOne({ login: req.params.username }).select('-password');
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const repos = await Repository.find({ owner: user._id });
-    const pins = await Pin.find({ user: user._id }).populate('repository').sort('order');
-    res.json({ user, repos, pins });
-  } catch (err) { res.status(500).send('Server error'); }
-});
-
-// CHANGE PASSWORD
-router.post('/change-password', auth, async (req, res) => {
-  try {
-    const { oldPassword, newPassword } = req.body;
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    const isMatch = await bcrypt.compare(oldPassword, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid current password" });
-
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(newPassword, salt);
-    await user.save();
-
-    res.json({ message: "Password updated successfully" });
-  } catch (err) { res.status(500).send('Server error'); }
-});
-
-// USER SEARCH
-router.get('/search', async (req, res) => {
-  try {
-    const query = req.query.q;
-    const users = await User.find({ login: { $regex: query, $options: 'i' } }).select('login name avatar_url');
-    res.json(users);
-  } catch (err) { res.status(500).send('Server error'); }
-});
-// UPDATE PROFILE
-router.put('/profile', auth, async (req, res) => {
-  try {
-    const { name, bio, avatar_url } = req.body;
-    const user = await User.findById(req.user.id);
-    if (name) user.name = name;
-    if (bio) user.bio = bio;
-    if (avatar_url) user.avatar_url = avatar_url;
-    await user.save();
-    res.json(user);
-  } catch (err) { res.status(500).send('Server error'); }
-});
+/**
+ * @swagger
+ * /auth/profile:
+ *   put:
+ *     summary: Update user profile
+ *     tags: [Auth]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string }
+ *               bio: { type: string }
+ *               avatar_url: { type: string }
+ */
+router.put('/profile', auth, validateRequest(updateProfileValidator), asyncHandler(async (req, res) => {
+  const user = await userService.updateProfile(req.user.id, req.validated);
+  successResponse(res, user);
+}));
 
 export default router;

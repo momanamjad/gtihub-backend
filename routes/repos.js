@@ -1,72 +1,263 @@
 import express from 'express';
-import Repository from '../models/repository.js';
-import Star from '../models/star.js';
-import Pin from '../models/pin.js';
-import auth from '../middleware/auth.js';
+import { validateRequest, validateQuery } from '../utils/validate.js';
+import { createRepoValidator, updateRepoValidator, paginationValidator } from '../utils/validators.js';
+import { successResponse, paginatedResponse } from '../utils/responseFormatter.js';
+import { asyncHandler, AppError } from '../utils/errorHandler.js';
+import { auth } from '../middleware/auth.js';
+import * as repoService from '../services/repoService.js';
 
 const router = express.Router();
 
-// CREATE REPO
-router.post('/', auth, async (req, res) => {
-  try {
-    const repo = new Repository({ ...req.body, owner: req.user.id });
-    await repo.save();
-    res.json(repo);
-  } catch (err) { res.status(500).send('Server error'); }
-});
+/**
+ * @swagger
+ * /repos:
+ *   post:
+ *     summary: Create a new repository
+ *     tags: [Repositories]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name]
+ *             properties:
+ *               name: { type: string }
+ *               description: { type: string }
+ *               language: { type: string }
+ *               visibility: { type: string, enum: [public, private] }
+ */
+router.post('/', auth, validateRequest(createRepoValidator), asyncHandler(async (req, res) => {
+  const repo = await repoService.createRepository(req.user.id, req.validated);
+  successResponse(res, repo, 'Repository created successfully', 201);
+}));
 
-// GET MY REPOS
-router.get('/', auth, async (req, res) => {
-  try {
-    const repos = await Repository.find({ owner: req.user.id }).sort({ created_at: -1 });
-    res.json(repos);
-  } catch (err) { res.status(500).send('Server error'); }
-});
+/**
+ * @swagger
+ * /repos:
+ *   get:
+ *     summary: Get user's repositories
+ *     tags: [Repositories]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: number, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: number, default: 10 }
+ *       - in: query
+ *         name: sort
+ *         schema: { type: string, default: '-created_at' }
+ */
+router.get('/', auth, validateQuery(paginationValidator), asyncHandler(async (req, res) => {
+  const { repos, total } = await repoService.getUserRepositories(req.user.id, req.query);
+  paginatedResponse(res, repos, req.query.page, req.query.limit, total);
+}));
 
-// DELETE REPO
-router.delete('/:id', auth, async (req, res) => {
-  try {
-    const repo = await Repository.findById(req.params.id);
-    if (!repo) return res.status(404).json({ message: 'Repo not found' });
-    if (repo.owner.toString() !== req.user.id) return res.status(401).json({ message: 'Unauthorized' });
+/**
+ * @swagger
+ * /repos/public/explore:
+ *   get:
+ *     summary: Explore public repositories
+ *     tags: [Repositories]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: number, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: number, default: 10 }
+ *       - in: query
+ *         name: language
+ *         schema: { type: string }
+ */
+router.get('/public/explore', validateQuery(paginationValidator), asyncHandler(async (req, res) => {
+  const { repos, total } = await repoService.getPublicRepositories(req.query);
+  paginatedResponse(res, repos, req.query.page, req.query.limit, total);
+}));
 
-    await Star.deleteMany({ repository: req.params.id });
-    await Pin.deleteMany({ repository: req.params.id });
-    await repo.deleteOne();
-    res.json({ message: 'Deleted' });
-  } catch (err) { res.status(500).send('Server error'); }
-});
+/**
+ * @swagger
+ * /repos/{id}:
+ *   get:
+ *     summary: Get repository details
+ *     tags: [Repositories]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ */
+router.get('/:id', asyncHandler(async (req, res) => {
+  const repo = await repoService.getRepositoryById(req.params.id);
+  successResponse(res, repo);
+}));
 
-// STAR (TOGGLE)
-router.post('/:id/star', auth, async (req, res) => {
-  try {
-    const existing = await Star.findOne({ user: req.user.id, repository: req.params.id });
-    if (existing) {
-      await existing.deleteOne();
-      await Repository.findByIdAndUpdate(req.params.id, { $inc: { stars_count: -1 } });
-      return res.json({ message: 'Unstarred' });
-    }
-    await new Star({ user: req.user.id, repository: req.params.id }).save();
-    await Repository.findByIdAndUpdate(req.params.id, { $inc: { stars_count: 1 } });
-    res.json({ message: 'Starred' });
-  } catch (err) { res.status(500).send('Server error'); }
-});
+/**
+ * @swagger
+ * /repos/{id}:
+ *   put:
+ *     summary: Update repository
+ *     tags: [Repositories]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string }
+ *               description: { type: string }
+ *               visibility: { type: string }
+ */
+router.put('/:id', auth, validateRequest(updateRepoValidator), asyncHandler(async (req, res) => {
+  const repo = await repoService.updateRepository(req.params.id, req.user.id, req.validated);
+  successResponse(res, repo);
+}));
 
-// PIN (TOGGLE)
-router.post('/:id/pin', auth, async (req, res) => {
-  try {
-    const existing = await Pin.findOne({ user: req.user.id, repository: req.params.id });
-    if (existing) {
-      await existing.deleteOne();
-      return res.json({ message: 'Unpinned' });
-    }
-    const count = await Pin.countDocuments({ user: req.user.id });
-    if (count >= 6) return res.status(400).json({ message: 'Max 6 pins allowed' });
+/**
+ * @swagger
+ * /repos/{id}:
+ *   delete:
+ *     summary: Delete repository
+ *     tags: [Repositories]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ */
+router.delete('/:id', auth, asyncHandler(async (req, res) => {
+  const result = await repoService.deleteRepository(req.params.id, req.user.id);
+  successResponse(res, result);
+}));
 
-    const pin = new Pin({ user: req.user.id, repository: req.params.id, order: count });
-    await pin.save();
-    res.json({ message: 'Pinned' });
-  } catch (err) { res.status(500).send('Server error'); }
-});
+/**
+ * @swagger
+ * /repos/{id}/star:
+ *   post:
+ *     summary: Toggle star on repository
+ *     tags: [Repositories]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ */
+router.post('/:id/star', auth, asyncHandler(async (req, res) => {
+  const result = await repoService.toggleStar(req.params.id, req.user.id);
+  successResponse(res, result);
+}));
+
+/**
+ * @swagger
+ * /repos/{id}/pin:
+ *   post:
+ *     summary: Toggle pin on repository
+ *     tags: [Repositories]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ */
+router.post('/:id/pin', auth, asyncHandler(async (req, res) => {
+  const result = await repoService.togglePin(req.params.id, req.user.id);
+  successResponse(res, result);
+}));
+
+/**
+ * @swagger
+ * /repos/search/query:
+ *   get:
+ *     summary: Search repositories
+ *     tags: [Repositories]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: number, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: number, default: 10 }
+ */
+router.get('/search/query', asyncHandler(async (req, res) => {
+  const { q, page = 1, limit = 10, language } = req.query;
+  if (!q) throw new AppError('Search query required', 400);
+  
+  const { repos, total } = await repoService.searchRepositories({ q, page, limit, language });
+  paginatedResponse(res, repos, page, limit, total);
+}));
+
+/**
+ * @swagger
+ * /repos/{id}/issues:
+ *   post:
+ *     summary: Create issue in repository
+ *     tags: [Issues]
+ *     security: [{ bearerAuth: [] }, { tokenAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [title]
+ *             properties:
+ *               title: { type: string }
+ *               description: { type: string }
+ *               labels: { type: array, items: { type: string } }
+ */
+router.post('/:id/issues', auth, asyncHandler(async (req, res) => {
+  const { title, description, labels } = req.body;
+  const issue = await repoService.createIssue(req.params.id, req.user.id, { title, description, labels });
+  successResponse(res, issue, 'Issue created successfully', 201);
+}));
+
+/**
+ * @swagger
+ * /repos/{id}/issues:
+ *   get:
+ *     summary: Get repository issues
+ *     tags: [Issues]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: state
+ *         schema: { type: string, enum: [open, closed], default: open }
+ *       - in: query
+ *         name: page
+ *         schema: { type: number, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: number, default: 10 }
+ */
+router.get('/:id/issues', asyncHandler(async (req, res) => {
+  const { page = 1, limit = 10, state = 'open' } = req.query;
+  const { issues, total } = await repoService.getRepositoryIssues(req.params.id, { page, limit, state });
+  paginatedResponse(res, issues, page, limit, total);
+}));
 
 export default router;
