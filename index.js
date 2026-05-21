@@ -22,7 +22,15 @@ dotenv.config();
 const app = express();
 
 // Security Middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+    },
+  },
+}));
 
 // Rate Limiting
 const generalLimiter = rateLimit({
@@ -58,11 +66,21 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch((err) => console.error('❌ Connection Error:', err.message));
 
 // Swagger Documentation
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs, {
+app.use('/api/docs', swaggerUi.serve);
+app.get('/api/docs', swaggerUi.setup(swaggerDocs, {
+  customCss: '.swagger-ui { max-width: 1400px; margin: 0 auto; }',
   swaggerOptions: {
     persistAuthorization: true,
   },
 }));
+app.get('/api/docs/swagger-ui.css', (req, res) => {
+  res.setHeader('Content-Type', 'text/css');
+  res.send(swaggerUi.CSS);
+});
+app.get('/api/docs/swagger-ui-bundle.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.send(swaggerUi.JS);
+});
 
 // Health Check Route
 app.get('/health', (req, res) => {
