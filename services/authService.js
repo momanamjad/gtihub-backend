@@ -3,6 +3,22 @@ import jwt from 'jsonwebtoken';
 import User from '../models/user.js';
 import { AppError } from '../utils/errorHandler.js';
 
+export const generateTokens = (userId) => {
+  const accessToken = jwt.sign(
+    { user: { id: userId } },
+    process.env.JWT_SECRET,
+    { expiresIn: '15m' }
+  );
+  
+  const refreshToken = jwt.sign(
+    { user: { id: userId } },
+    process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  return { accessToken, refreshToken };
+};
+
 export const register = async ({ login, email, password }) => {
   let user = await User.findOne({ $or: [{ email }, { login }] });
   if (user) throw new AppError('User already exists', 400);
@@ -12,8 +28,8 @@ export const register = async ({ login, email, password }) => {
   user.password = await bcrypt.hash(password, salt);
   await user.save();
 
-  const token = jwt.sign({ user: { id: user.id } }, process.env.JWT_SECRET, { expiresIn: '7d' });
-  return { token, user: { id: user._id, login: user.login, email: user.email } };
+  const { accessToken, refreshToken } = generateTokens(user.id);
+  return { accessToken, refreshToken, user: { id: user._id, login: user.login, email: user.email } };
 };
 
 export const login = async ({ email, password }) => {
@@ -23,8 +39,8 @@ export const login = async ({ email, password }) => {
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) throw new AppError('Invalid Credentials', 400);
 
-  const token = jwt.sign({ user: { id: user.id } }, process.env.JWT_SECRET, { expiresIn: '7d' });
-  return { token, user: { id: user._id, login: user.login, email: user.email } };
+  const { accessToken, refreshToken } = generateTokens(user.id);
+  return { accessToken, refreshToken, user: { id: user._id, login: user.login, email: user.email } };
 };
 
 export const changePassword = async (userId, { oldPassword, newPassword }) => {
@@ -45,4 +61,13 @@ export const getUserProfile = async (userId) => {
   const user = await User.findById(userId).select('-password');
   if (!user) throw new AppError('User not found', 404);
   return user;
+};
+
+export const verifyRefreshToken = async (token) => {
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
+    return decoded.user.id;
+  } catch (err) {
+    throw new AppError('Refresh token is not valid or expired', 401);
+  }
 };

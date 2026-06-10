@@ -23,7 +23,12 @@ export const validateQuery = (schema) => {
       return next(err);
     }
     
-    req.query = value;
+    // Express 5 request query is a getter-only property. Mutate the object contents instead of reassigning it.
+    for (const key of Object.keys(req.query)) {
+      delete req.query[key];
+    }
+    Object.assign(req.query, value);
+    
     next();
   };
 };

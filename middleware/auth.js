@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { errorResponse } from '../utils/responseFormatter.js';
 
 export const auth = (req, res, next) => {
-  const token = req.header('x-auth-token') || req.header('authorization')?.replace('Bearer ', '');
+  const token = req.cookies?.accessToken || req.header('x-auth-token') || req.header('authorization')?.replace('Bearer ', '');
   
   if (!token) {
     return errorResponse(res, 'No token, authorization denied', 401);
