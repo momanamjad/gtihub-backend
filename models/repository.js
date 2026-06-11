@@ -16,7 +16,7 @@ const repositorySchema = new mongoose.Schema({
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 repositorySchema.index({ owner: 1, is_deleted: 1 });
-repositorySchema.index({ name: 'text', description: 'text' });
+repositorySchema.index({ name: 'text', description: 'text' }, { language_override: 'none' });
 repositorySchema.index({ visibility: 1, is_deleted: 1 });
 
 export default mongoose.model('Repository', repositorySchema);

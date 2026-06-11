@@ -20,4 +20,21 @@ export const auth = (req, res, next) => {
   }
 };
 
+export const optionalAuth = (req, res, next) => {
+  const token = req.cookies?.accessToken || req.header('x-auth-token') || req.header('authorization')?.replace('Bearer ', '');
+  
+  if (!token) {
+    return next();
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded.user;
+    next();
+  } catch (err) {
+    // If token is invalid or expired, continue as guest
+    next();
+  }
+};
+
 export default auth;

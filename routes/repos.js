@@ -3,7 +3,7 @@ import { validateRequest, validateQuery } from '../utils/validate.js';
 import { createRepoValidator, updateRepoValidator, paginationValidator } from '../utils/validators.js';
 import { successResponse, paginatedResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
-import { auth } from '../middleware/auth.js';
+import { auth, optionalAuth } from '../middleware/auth.js';
 import * as repoService from '../services/repoService.js';
 
 const router = express.Router();
@@ -90,8 +90,8 @@ router.get('/public/explore', validateQuery(paginationValidator), asyncHandler(a
  *         required: true
  *         schema: { type: string }
  */
-router.get('/:id', asyncHandler(async (req, res) => {
-  const repo = await repoService.getRepositoryById(req.params.id);
+router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
+  const repo = await repoService.getRepositoryById(req.params.id, req.user?.id);
   successResponse(res, repo);
 }));
 
@@ -254,9 +254,9 @@ router.post('/:id/issues', auth, asyncHandler(async (req, res) => {
  *         name: limit
  *         schema: { type: number, default: 10 }
  */
-router.get('/:id/issues', asyncHandler(async (req, res) => {
+router.get('/:id/issues', optionalAuth, asyncHandler(async (req, res) => {
   const { page = 1, limit = 10, state = 'open' } = req.query;
-  const { issues, total } = await repoService.getRepositoryIssues(req.params.id, { page, limit, state });
+  const { issues, total } = await repoService.getRepositoryIssues(req.params.id, req.user?.id, { page, limit, state });
   paginatedResponse(res, issues, page, limit, total);
 }));
 

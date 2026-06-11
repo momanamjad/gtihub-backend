@@ -29,7 +29,9 @@ export const register = async ({ login, email, password }) => {
   await user.save();
 
   const { accessToken, refreshToken } = generateTokens(user.id);
-  return { accessToken, refreshToken, user: { id: user._id, login: user.login, email: user.email } };
+  const userObj = user.toObject();
+  delete userObj.password;
+  return { accessToken, refreshToken, user: userObj };
 };
 
 export const login = async ({ email, password }) => {
@@ -40,7 +42,9 @@ export const login = async ({ email, password }) => {
   if (!isMatch) throw new AppError('Invalid Credentials', 400);
 
   const { accessToken, refreshToken } = generateTokens(user.id);
-  return { accessToken, refreshToken, user: { id: user._id, login: user.login, email: user.email } };
+  const userObj = user.toObject();
+  delete userObj.password;
+  return { accessToken, refreshToken, user: userObj };
 };
 
 export const changePassword = async (userId, { oldPassword, newPassword }) => {

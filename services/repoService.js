@@ -42,12 +42,16 @@ export const getPublicRepositories = async ({ page = 1, limit = 10, sort = '-cre
   return { repos, total };
 };
 
-export const getRepositoryById = async (repoId) => {
+export const getRepositoryById = async (repoId, viewerId) => {
   const repo = await Repository.findById(repoId)
     .populate('owner', 'login avatar_url followers_count')
     .populate('issues_count');
 
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
+  if (repo.visibility === 'private' && (!viewerId || repo.owner._id.toString() !== viewerId.toString())) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
   return repo;
 };
 
@@ -80,6 +84,10 @@ export const toggleStar = async (repoId, userId) => {
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
 
+  if (repo.visibility === 'private' && repo.owner.toString() !== userId.toString()) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
+
   const existing = await Star.findOne({ user: userId, repository: repoId });
   
   if (existing) {
@@ -106,7 +114,11 @@ export const toggleStar = async (repoId, userId) => {
 
 export const togglePin = async (repoId, userId) => {
   const repo = await Repository.findById(repoId);
-  if (!repo) throw new AppError('Repository not found', 404);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
+  if (repo.visibility === 'private' && repo.owner.toString() !== userId.toString()) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
 
   const existing = await Pin.findOne({ user: userId, repository: repoId });
   
@@ -144,6 +156,10 @@ export const createIssue = async (repoId, userId, issueData) => {
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
 
+  if (repo.visibility === 'private' && repo.owner.toString() !== userId.toString()) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
+
   const issue = new Issue({ ...issueData, repository: repoId, creator: userId });
   await issue.save();
   await Repository.findByIdAndUpdate(repoId, { $inc: { issues_count: 1 } });
@@ -151,7 +167,14 @@ export const createIssue = async (repoId, userId, issueData) => {
   return issue;
 };
 
-export const getRepositoryIssues = async (repoId, { page = 1, limit = 10, state = 'open' }) => {
+export const getRepositoryIssues = async (repoId, viewerId, { page = 1, limit = 10, state = 'open' }) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
+  if (repo.visibility === 'private' && (!viewerId || repo.owner.toString() !== viewerId.toString())) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
+
   const skip = (page - 1) * limit;
   const issues = await Issue.find({ repository: repoId, state, is_deleted: false })
     .populate('creator', 'login avatar_url')

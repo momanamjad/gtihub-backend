@@ -9,7 +9,7 @@ import {
 } from '../utils/validators.js';
 import { successResponse, paginatedResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
-import { auth } from '../middleware/auth.js';
+import { auth, optionalAuth } from '../middleware/auth.js';
 import * as authService from '../services/authService.js';
 import * as userService from '../services/userService.js';
 
@@ -111,8 +111,8 @@ router.get('/me', auth, asyncHandler(async (req, res) => {
  *         required: true
  *         schema: { type: string }
  */
-router.get('/user/:username', asyncHandler(async (req, res) => {
-  const { user, repos, pins } = await userService.getUserPublicProfile(req.params.username);
+router.get('/user/:username', optionalAuth, asyncHandler(async (req, res) => {
+  const { user, repos, pins } = await userService.getUserPublicProfile(req.params.username, req.user?.id);
   successResponse(res, { user, repos, pins });
 }));
 

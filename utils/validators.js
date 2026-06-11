@@ -17,9 +17,18 @@ export const changePasswordValidator = Joi.object({
 });
 
 export const updateProfileValidator = Joi.object({
-  name: Joi.string().max(50),
-  bio: Joi.string().max(200),
-  avatar_url: Joi.string().uri(),
+  name: Joi.string().max(50).allow(''),
+  bio: Joi.string().max(200).allow(''),
+  avatar_url: Joi.string().allow(''),
+  company: Joi.string().max(100).allow(''),
+  location: Joi.string().max(100).allow(''),
+  blog: Joi.string().allow(''),
+  pronouns: Joi.string().max(20).allow(''),
+  status: Joi.object({
+    emoji: Joi.string().allow(''),
+    text: Joi.string().allow(''),
+    isBusy: Joi.boolean(),
+  }),
 }).min(1);
 
 export const createRepoValidator = Joi.object({

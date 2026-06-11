@@ -5,24 +5,38 @@ import Follower from '../models/follower.js';
 import Notification from '../models/notification.js';
 import { AppError } from '../utils/errorHandler.js';
 
-export const getUserPublicProfile = async (username) => {
+export const getUserPublicProfile = async (username, viewerId) => {
   const user = await User.findOne({ login: username }).select('-password');
   if (!user) throw new AppError('User not found', 404);
 
-  const repos = await Repository.find({ owner: user._id, is_deleted: false });
-  const pins = await Pin.find({ user: user._id }).populate('repository').sort('order');
+  const isOwner = viewerId && viewerId === user._id.toString();
+
+  const repoQuery = { owner: user._id, is_deleted: false };
+  if (!isOwner) {
+    repoQuery.visibility = 'public';
+  }
+
+  const repos = await Repository.find(repoQuery);
+  let pins = await Pin.find({ user: user._id }).populate('repository').sort('order');
+  
+  if (!isOwner) {
+    pins = pins.filter(pin => pin.repository && !pin.repository.is_deleted && pin.repository.visibility === 'public');
+  }
   
   return { user, repos, pins };
 };
 
-export const updateProfile = async (userId, { name, bio, avatar_url }) => {
+export const updateProfile = async (userId, updates) => {
   const user = await User.findById(userId);
   if (!user) throw new AppError('User not found', 404);
 
-  if (name) user.name = name;
-  if (bio) user.bio = bio;
-  if (avatar_url) user.avatar_url = avatar_url;
-  
+  const allowedFields = ['name', 'bio', 'avatar_url', 'company', 'location', 'blog', 'pronouns', 'status'];
+  allowedFields.forEach(field => {
+    if (updates[field] !== undefined) {
+      user[field] = updates[field];
+    }
+  });
+
   await user.save();
   return user;
 };
