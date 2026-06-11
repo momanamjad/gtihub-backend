@@ -7,7 +7,15 @@ import Notification from '../models/notification.js';
 import { AppError } from '../utils/errorHandler.js';
 
 export const createRepository = async (userId, repoData) => {
-  const repo = new Repository({ ...repoData, owner: userId });
+  const defaultTree = [
+    { type: 'dir',  name: 'src',       path: 'src',       children: [] },
+    { type: 'file', name: 'README.md', path: 'README.md', content: `# ${repoData.name}\n` }
+  ];
+  const repo = new Repository({ 
+    ...repoData, 
+    fileTree: repoData.fileTree || defaultTree, 
+    owner: userId 
+  });
   await repo.save();
   await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
   return repo;
