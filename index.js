@@ -14,6 +14,7 @@ import swaggerDocs from './config/swagger.js';
 import authRoutes from './routes/auth.js';
 import repoRoutes from './routes/repos.js';
 import userRoutes from './routes/users.js';
+import pullRoutes from './routes/pulls.js';
 
 // Import error handling
 import { errorHandler } from './utils/errorHandler.js';
@@ -56,6 +57,9 @@ const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
   message: 'Too many requests from this IP, please try again later.',
+  skip: (req) => {
+    return !!req.cookies?.accessToken;
+  }
 });
 
 const authLimiter = rateLimit({
@@ -112,6 +116,7 @@ app.get('/', (req, res) => res.json({
 
 app.use('/api/auth', authRoutes);
 app.use('/api/repos', repoRoutes);
+app.use('/api/repos/:repoId/pulls', pullRoutes);
 app.use('/api/users', userRoutes);
 
 // 404 Handler

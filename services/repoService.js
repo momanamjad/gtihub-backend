@@ -4,19 +4,23 @@ import Pin from '../models/pin.js';
 import Issue from '../models/issue.js';
 import User from '../models/user.js';
 import Notification from '../models/notification.js';
+import FileNode from '../models/fileNode.js';
 import { AppError } from '../utils/errorHandler.js';
 
 export const createRepository = async (userId, repoData) => {
-  const defaultTree = [
-    { type: 'dir',  name: 'src',       path: 'src',       children: [] },
-    { type: 'file', name: 'README.md', path: 'README.md', content: `# ${repoData.name}\n` }
-  ];
   const repo = new Repository({ 
     ...repoData, 
-    fileTree: repoData.fileTree || defaultTree, 
     owner: userId 
   });
   await repo.save();
+
+  // Create default file nodes in FileNode collection
+  const defaultTree = [
+    { repository: repo._id, type: 'dir', name: 'src', path: 'src', parentPath: '' },
+    { repository: repo._id, type: 'file', name: 'README.md', path: 'README.md', content: `# ${repoData.name}\n`, parentPath: '' }
+  ];
+  await FileNode.insertMany(defaultTree);
+
   await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
   return repo;
 };
@@ -60,7 +64,10 @@ export const getRepositoryById = async (repoId, viewerId) => {
   if (repo.visibility === 'private' && (!viewerId || repo.owner._id.toString() !== viewerId.toString())) {
     throw new AppError('Unauthorized access to private repository', 403);
   }
-  return repo;
+  
+  const repoObj = repo.toObject();
+  repoObj.fileTree = await getRepoFileTree(repoId, viewerId);
+  return repoObj;
 };
 
 export const updateRepository = async (repoId, userId, updates) => {
@@ -194,4 +201,91 @@ export const getRepositoryIssues = async (repoId, viewerId, { page = 1, limit = 
   const total = await Issue.countDocuments({ repository: repoId, state, is_deleted: false });
 
   return { issues, total };
+};
+
+export const getRepoFileTree = async (repoId, viewerId) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.visibility === 'private' && (!viewerId || repo.owner.toString() !== viewerId.toString())) {
+    throw new AppError('Unauthorized', 403);
+  }
+
+  const flatNodes = await FileNode.find({ repository: repoId }).lean();
+  
+  const buildTree = (parentPath = '') => {
+    return flatNodes
+      .filter(n => n.parentPath === parentPath)
+      .map(n => {
+        const item = {
+          _id: n._id,
+          name: n.name,
+          path: n.path,
+          type: n.type,
+          content: n.content
+        };
+        if (n.type === 'dir') {
+          item.children = buildTree(n.path);
+        }
+        return item;
+      });
+  };
+
+  return buildTree('');
+};
+
+export const addRepoFileNode = async (repoId, userId, { name, path, type, content, parentPath }) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.owner.toString() !== userId.toString()) throw new AppError('Unauthorized', 401);
+
+  const existing = await FileNode.findOne({ repository: repoId, path });
+  if (existing) throw new AppError('File or directory already exists', 400);
+
+  const node = new FileNode({ repository: repoId, name, path, type, content, parentPath });
+  await node.save();
+  return node;
+};
+
+export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, content }) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.owner.toString() !== userId.toString()) throw new AppError('Unauthorized', 401);
+
+  const node = await FileNode.findOne({ repository: repoId, path: oldPath });
+  if (!node) throw new AppError('File not found', 404);
+
+  if (name) node.name = name;
+  if (path) {
+    const oldPrefix = oldPath + '/';
+    const newPrefix = path + '/';
+    const children = await FileNode.find({ repository: repoId, path: new RegExp('^' + oldPrefix) });
+    for (const child of children) {
+      child.path = child.path.replace(oldPrefix, newPrefix);
+      child.parentPath = child.parentPath.replace(oldPath, path);
+      await child.save();
+    }
+    node.path = path;
+    node.parentPath = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
+  }
+  if (content !== undefined) node.content = content;
+
+  await node.save();
+  return node;
+};
+
+export const deleteRepoFileNode = async (repoId, userId, path) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.owner.toString() !== userId.toString()) throw new AppError('Unauthorized', 401);
+
+  const node = await FileNode.findOne({ repository: repoId, path });
+  if (!node) throw new AppError('File not found', 404);
+
+  if (node.type === 'dir') {
+    await FileNode.deleteMany({ repository: repoId, path: new RegExp('^' + path + '(/|$)') });
+  } else {
+    await node.deleteOne();
+  }
+
+  return { message: 'File deleted successfully' };
 };

@@ -12,7 +12,6 @@ const repositorySchema = new mongoose.Schema({
   issues_count: { type: Number, default: 0 },
   url: { type: String, default: "" },
   topics: [String],
-  fileTree: { type: Array, default: [] },
   is_deleted: { type: Boolean, default: false, index: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

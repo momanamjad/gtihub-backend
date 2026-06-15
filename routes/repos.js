@@ -260,4 +260,26 @@ router.get('/:id/issues', optionalAuth, asyncHandler(async (req, res) => {
   paginatedResponse(res, issues, page, limit, total);
 }));
 
+router.get('/:id/contents', optionalAuth, asyncHandler(async (req, res) => {
+  const tree = await repoService.getRepoFileTree(req.params.id, req.user?.id);
+  successResponse(res, tree);
+}));
+
+router.post('/:id/contents', auth, asyncHandler(async (req, res) => {
+  const node = await repoService.addRepoFileNode(req.params.id, req.user.id, req.body);
+  successResponse(res, node, 'File created successfully', 201);
+}));
+
+router.put('/:id/contents', auth, asyncHandler(async (req, res) => {
+  const { oldPath, name, path, content } = req.body;
+  const node = await repoService.updateRepoFileNode(req.params.id, req.user.id, oldPath, { name, path, content });
+  successResponse(res, node, 'File updated successfully');
+}));
+
+router.delete('/:id/contents', auth, asyncHandler(async (req, res) => {
+  const { path } = req.body;
+  const result = await repoService.deleteRepoFileNode(req.params.id, req.user.id, path);
+  successResponse(res, result);
+}));
+
 export default router;
