@@ -15,6 +15,7 @@ import authRoutes from './routes/auth.js';
 import repoRoutes from './routes/repos.js';
 import userRoutes from './routes/users.js';
 import pullRoutes from './routes/pulls.js';
+import discussionRoutes from './routes/discussions.js';
 
 // Import error handling
 import { errorHandler } from './utils/errorHandler.js';
@@ -55,7 +56,7 @@ app.use(helmet({
 // Rate Limiting
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 10000, // limit each IP to 10000 requests per windowMs to prevent rate limiting in development
   message: 'Too many requests from this IP, please try again later.',
   skip: (req) => {
     return !!req.cookies?.accessToken;
@@ -117,6 +118,7 @@ app.get('/', (req, res) => res.json({
 app.use('/api/auth', authRoutes);
 app.use('/api/repos', repoRoutes);
 app.use('/api/repos/:repoId/pulls', pullRoutes);
+app.use('/api/repos/:repoId/discussions', discussionRoutes);
 app.use('/api/users', userRoutes);
 
 // 404 Handler

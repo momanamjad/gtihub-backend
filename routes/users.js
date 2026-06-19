@@ -116,6 +116,30 @@ router.get('/notifications', auth, validateQuery(paginationValidator), asyncHand
  *         required: true
  *         schema: { type: string }
  */
+import PullRequest from '../models/pullRequest.js';
+import Repository from '../models/repository.js';
+
+router.get('/pulls', auth, asyncHandler(async (req, res) => {
+  const userRepos = await Repository.find({ owner: req.user.id, is_deleted: false });
+  const repoIds = userRepos.map(r => r._id);
+  
+  const prs = await PullRequest.find({
+    $or: [
+      { repository: { $in: repoIds } },
+      { author: req.user.id }
+    ]
+  })
+  .populate('author', 'login avatar_url')
+  .populate({
+    path: 'repository',
+    select: 'name owner',
+    populate: { path: 'owner', select: 'login' }
+  })
+  .sort('-createdAt');
+  
+  successResponse(res, prs);
+}));
+
 router.put('/notifications/:notificationId', auth, asyncHandler(async (req, res) => {
   const notification = await userService.markNotificationAsRead(req.params.notificationId);
   successResponse(res, notification, 'Notification marked as read');

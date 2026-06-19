@@ -4,12 +4,21 @@ import Repository from '../models/repository.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
 import { successResponse, errorResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
+import { recordContribution } from '../services/userService.js';
 
 const router = express.Router({ mergeParams: true });
 
 // List all PRs for a repository
 router.get('/', optionalAuth, asyncHandler(async (req, res) => {
   const { repoId } = req.params;
+  
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
+  if (repo.visibility === 'private' && (!req.user || repo.owner.toString() !== req.user.id.toString())) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
+
   const prs = await PullRequest.find({ repository: repoId })
     .populate('author', 'login avatar_url')
     .sort('-createdAt');
@@ -25,6 +34,10 @@ router.post('/', auth, asyncHandler(async (req, res) => {
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
 
+  if (repo.visibility === 'private' && repo.owner.toString() !== req.user.id.toString()) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
+
   const pr = new PullRequest({
     repository: repoId,
     title,
@@ -35,6 +48,10 @@ router.post('/', auth, asyncHandler(async (req, res) => {
   });
 
   await pr.save();
+  
+  // Record contribution
+  await recordContribution(req.user.id, 'pr_created', repoId);
+  
   successResponse(res, pr, 'Pull Request created successfully', 201);
 }));
 

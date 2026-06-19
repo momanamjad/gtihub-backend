@@ -1,9 +1,25 @@
 import User from '../models/user.js';
 import Repository from '../models/repository.js';
 import Pin from '../models/pin.js';
+import Star from '../models/star.js';
 import Follower from '../models/follower.js';
 import Notification from '../models/notification.js';
+import Contribution from '../models/contribution.js';
 import { AppError } from '../utils/errorHandler.js';
+
+export const recordContribution = async (userId, type, repositoryId = null) => {
+  try {
+    const contribution = new Contribution({
+      user: userId,
+      type,
+      repository: repositoryId,
+      count: 1
+    });
+    await contribution.save();
+  } catch (err) {
+    console.error('Error recording contribution:', err);
+  }
+};
 
 export const getUserPublicProfile = async (username, viewerId) => {
   const user = await User.findOne({ login: username }).select('-password');
@@ -16,14 +32,61 @@ export const getUserPublicProfile = async (username, viewerId) => {
     repoQuery.visibility = 'public';
   }
 
-  const repos = await Repository.find(repoQuery);
+  const repos = await Repository.find(repoQuery).populate('owner', 'login name avatar_url');
   let pins = await Pin.find({ user: user._id }).populate('repository').sort('order');
   
   if (!isOwner) {
     pins = pins.filter(pin => pin.repository && !pin.repository.is_deleted && pin.repository.visibility === 'public');
   }
+
+  // Aggregate contributions in the last 365 days
+  const oneYearAgo = new Date();
+  oneYearAgo.setDate(oneYearAgo.getDate() - 365);
+
+  const contributions = await Contribution.aggregate([
+    {
+      $match: {
+        user: user._id,
+        created_at: { $gte: oneYearAgo }
+      }
+    },
+    {
+      $group: {
+        _id: {
+          $dateToString: { format: "%Y-%m-%d", date: "$created_at" }
+        },
+        count: { $sum: "$count" }
+      }
+    },
+    {
+      $project: {
+        _id: 0,
+        date: "$_id",
+        count: 1
+      }
+    },
+    {
+      $sort: { date: 1 }
+    }
+  ]);
+  const userObj = user.toObject();
+  userObj.contributions = contributions;
   
-  return { user, repos, pins };
+  let isFollowing = false;
+  if (viewerId) {
+    const followRecord = await Follower.findOne({ follower: viewerId, following: user._id });
+    isFollowing = !!followRecord;
+  }
+  userObj.isFollowing = isFollowing;
+  userObj._id = user._id.toString();
+
+  const stars = await Star.find({ user: user._id }).populate({
+    path: 'repository',
+    populate: { path: 'owner', select: 'login name avatar_url' }
+  });
+  const starredRepos = stars.map(s => s.repository).filter(r => r && !r.is_deleted);
+  
+  return { user: userObj, repos, pins, starredRepos };
 };
 
 export const updateProfile = async (userId, updates) => {

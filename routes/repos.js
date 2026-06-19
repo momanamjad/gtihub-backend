@@ -260,6 +260,11 @@ router.get('/:id/issues', optionalAuth, asyncHandler(async (req, res) => {
   paginatedResponse(res, issues, page, limit, total);
 }));
 
+router.put('/:id/issues/:issueId', auth, asyncHandler(async (req, res) => {
+  const issue = await repoService.updateIssue(req.params.id, req.params.issueId, req.user.id, req.body);
+  successResponse(res, issue, 'Issue updated successfully');
+}));
+
 router.get('/:id/contents', optionalAuth, asyncHandler(async (req, res) => {
   const tree = await repoService.getRepoFileTree(req.params.id, req.user?.id);
   successResponse(res, tree);
@@ -280,6 +285,11 @@ router.delete('/:id/contents', auth, asyncHandler(async (req, res) => {
   const { path } = req.body;
   const result = await repoService.deleteRepoFileNode(req.params.id, req.user.id, path);
   successResponse(res, result);
+}));
+
+router.get('/:id/commits', optionalAuth, asyncHandler(async (req, res) => {
+  const commits = await repoService.getRepoCommits(req.params.id, req.user?.id);
+  successResponse(res, commits);
 }));
 
 export default router;

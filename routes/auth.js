@@ -22,7 +22,7 @@ const setTokenCookies = (res, accessToken, refreshToken) => {
     httpOnly: true,
     secure: isProduction,
     sameSite: 'lax',
-    maxAge: 15 * 60 * 1000 // 15 minutes
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   });
 
   res.cookie('refreshToken', refreshToken, {
@@ -112,8 +112,8 @@ router.get('/me', auth, asyncHandler(async (req, res) => {
  *         schema: { type: string }
  */
 router.get('/user/:username', optionalAuth, asyncHandler(async (req, res) => {
-  const { user, repos, pins } = await userService.getUserPublicProfile(req.params.username, req.user?.id);
-  successResponse(res, { user, repos, pins });
+  const { user, repos, pins, starredRepos } = await userService.getUserPublicProfile(req.params.username, req.user?.id);
+  successResponse(res, { user, repos, pins, starredRepos });
 }));
 
 /**

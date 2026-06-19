@@ -5,7 +5,9 @@ import Issue from '../models/issue.js';
 import User from '../models/user.js';
 import Notification from '../models/notification.js';
 import FileNode from '../models/fileNode.js';
+import Contribution from '../models/contribution.js';
 import { AppError } from '../utils/errorHandler.js';
+import { recordContribution } from './userService.js';
 
 export const createRepository = async (userId, repoData) => {
   const repo = new Repository({ 
@@ -22,12 +24,17 @@ export const createRepository = async (userId, repoData) => {
   await FileNode.insertMany(defaultTree);
 
   await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
+  
+  // Record contribution
+  await recordContribution(userId, 'repo_created', repo._id);
+  
   return repo;
 };
 
 export const getUserRepositories = async (userId, { page = 1, limit = 10, sort = '-created_at' }) => {
   const skip = (page - 1) * limit;
   const repos = await Repository.find({ owner: userId, is_deleted: false })
+    .populate('owner', 'login name avatar_url')
     .sort(sort)
     .skip(skip)
     .limit(limit);
@@ -131,8 +138,8 @@ export const togglePin = async (repoId, userId) => {
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
 
-  if (repo.visibility === 'private' && repo.owner.toString() !== userId.toString()) {
-    throw new AppError('Unauthorized access to private repository', 403);
+  if (repo.visibility === 'private') {
+    throw new AppError('Only public repositories can be pinned', 400);
   }
 
   const existing = await Pin.findOne({ user: userId, repository: repoId });
@@ -179,6 +186,9 @@ export const createIssue = async (repoId, userId, issueData) => {
   await issue.save();
   await Repository.findByIdAndUpdate(repoId, { $inc: { issues_count: 1 } });
 
+  // Record contribution
+  await recordContribution(userId, 'issue_created', repoId);
+
   return issue;
 };
 
@@ -201,6 +211,48 @@ export const getRepositoryIssues = async (repoId, viewerId, { page = 1, limit = 
   const total = await Issue.countDocuments({ repository: repoId, state, is_deleted: false });
 
   return { issues, total };
+};
+
+export const updateIssue = async (repoId, issueId, userId, updateData) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
+  if (repo.visibility === 'private' && repo.owner.toString() !== userId.toString()) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
+
+  const issue = await Issue.findOne({ _id: issueId, repository: repoId, is_deleted: false });
+  if (!issue) throw new AppError('Issue not found', 404);
+
+  const allowedFields = ['title', 'description', 'state', 'labels', 'assignee'];
+  for (const field of allowedFields) {
+    if (updateData[field] !== undefined) {
+      if (field === 'assignee') {
+        if (updateData[field]) {
+          const userObj = await User.findOne({ login: updateData[field] });
+          if (userObj) {
+            issue.assignee = userObj._id;
+          } else {
+            try {
+              issue.assignee = updateData[field];
+            } catch (e) {
+              issue.assignee = null;
+            }
+          }
+        } else {
+          issue.assignee = null;
+        }
+      } else {
+        issue[field] = updateData[field];
+      }
+    }
+  }
+
+  await issue.save();
+  
+  return await Issue.findById(issue._id)
+    .populate('creator', 'login avatar_url')
+    .populate('assignee', 'login avatar_url');
 };
 
 export const getRepoFileTree = async (repoId, viewerId) => {
@@ -243,6 +295,10 @@ export const addRepoFileNode = async (repoId, userId, { name, path, type, conten
 
   const node = new FileNode({ repository: repoId, name, path, type, content, parentPath });
   await node.save();
+  
+  // Record contribution
+  await recordContribution(userId, 'file_created', repoId);
+  
   return node;
 };
 
@@ -270,6 +326,10 @@ export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, 
   if (content !== undefined) node.content = content;
 
   await node.save();
+  
+  // Record contribution
+  await recordContribution(userId, 'file_updated', repoId);
+  
   return node;
 };
 
@@ -288,4 +348,21 @@ export const deleteRepoFileNode = async (repoId, userId, path) => {
   }
 
   return { message: 'File deleted successfully' };
+};
+
+export const getRepoCommits = async (repoId, viewerId) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.visibility === 'private' && (!viewerId || repo.owner.toString() !== viewerId.toString())) {
+    throw new AppError('Unauthorized', 403);
+  }
+
+  const commits = await Contribution.find({ 
+    repository: repoId, 
+    type: { $in: ['repo_created', 'file_created', 'file_updated'] } 
+  })
+  .populate('user', 'login name avatar_url')
+  .sort('-created_at');
+
+  return commits;
 };
