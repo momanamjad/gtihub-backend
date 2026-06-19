@@ -21,22 +21,22 @@ const setTokenCookies = (res, accessToken, refreshToken) => {
   res.cookie('accessToken', accessToken, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
+    sameSite: isProduction ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   });
 
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
+    sameSite: isProduction ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   });
 };
 
 const clearTokenCookies = (res) => {
   const isProduction = process.env.NODE_ENV === 'production';
-  res.clearCookie('accessToken', { httpOnly: true, secure: isProduction, sameSite: 'lax' });
-  res.clearCookie('refreshToken', { httpOnly: true, secure: isProduction, sameSite: 'lax' });
+  res.clearCookie('accessToken', { httpOnly: true, secure: isProduction, sameSite: isProduction ? 'none' : 'lax' });
+  res.clearCookie('refreshToken', { httpOnly: true, secure: isProduction, sameSite: isProduction ? 'none' : 'lax' });
 };
 
 /**
