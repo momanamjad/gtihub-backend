@@ -162,9 +162,12 @@ app.get('/health', (req, res) => {
 
 // Safe Debug Route
 app.get('/debug', (req, res) => {
+  const dbUri = process.env.MONGODB_URI || "";
+  const redactedUri = dbUri.trim().replace(/^["']|["']$/g, '').replace(/:([^@]+)@/, ':****@');
   res.json({
     node_env: process.env.NODE_ENV,
-    has_mongodb_uri: !!process.env.MONGODB_URI,
+    has_mongodb_uri: !!dbUri,
+    redacted_uri: redactedUri,
     has_jwt_secret: !!process.env.JWT_SECRET,
     mongodb_state: mongoose.connection.readyState,
     allowed_origins: allowedOrigins
