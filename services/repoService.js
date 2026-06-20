@@ -10,18 +10,21 @@ import { AppError } from '../utils/errorHandler.js';
 import { recordContribution } from './userService.js';
 
 export const createRepository = async (userId, repoData) => {
+  const { addReadme, ...restData } = repoData;
   const repo = new Repository({ 
-    ...repoData, 
+    ...restData, 
     owner: userId 
   });
   await repo.save();
 
-  // Create default file nodes in FileNode collection
-  const defaultTree = [
-    { repository: repo._id, type: 'dir', name: 'src', path: 'src', parentPath: '' },
-    { repository: repo._id, type: 'file', name: 'README.md', path: 'README.md', content: `# ${repoData.name}\n`, parentPath: '' }
-  ];
-  await FileNode.insertMany(defaultTree);
+  if (addReadme) {
+    // Create default file nodes in FileNode collection
+    const defaultTree = [
+      { repository: repo._id, type: 'dir', name: 'src', path: 'src', parentPath: '' },
+      { repository: repo._id, type: 'file', name: 'README.md', path: 'README.md', content: `# ${repoData.name}\n`, parentPath: '' }
+    ];
+    await FileNode.insertMany(defaultTree);
+  }
 
   await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
   

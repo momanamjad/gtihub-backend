@@ -11,6 +11,8 @@ import Repository from '../models/repository.js';
 import ProjectCard from '../models/project.js';
 import WorkflowRun from '../models/workflowRun.js';
 import Secret from '../models/secret.js';
+import FileNode from '../models/fileNode.js';
+import { recordContribution } from '../services/userService.js';
 
 const ENCRYPTION_KEY = process.env.SECRET_ENCRYPTION_KEY || 'a_very_secure_and_long_32_byte_key_fallback';
 const IV_LENGTH = 16;
@@ -519,6 +521,38 @@ router.delete('/:id/secrets/:secretId', auth, asyncHandler(async (req, res) => {
 
   await Secret.deleteOne({ _id: req.params.secretId });
   successResponse(res, null, 'Secret deleted successfully');
+}));
+
+// Bulk Sync Route for CLI Pushing
+router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.owner.toString() !== req.user.id.toString()) throw new AppError('Unauthorized', 401);
+
+  const { files } = req.body;
+  if (!Array.isArray(files)) throw new AppError('Files list must be an array', 400);
+
+  // 1. Delete all current file nodes
+  await FileNode.deleteMany({ repository: req.params.id });
+
+  // 2. Insert new file nodes
+  const formattedNodes = files.map(file => ({
+    repository: req.params.id,
+    name: file.name,
+    path: file.path,
+    type: file.type || 'file',
+    content: file.content || "",
+    parentPath: file.parentPath || ""
+  }));
+
+  if (formattedNodes.length > 0) {
+    await FileNode.insertMany(formattedNodes);
+  }
+
+  // 3. Record a contribution (Push Commit)
+  await recordContribution(req.user.id, 'file_updated', req.params.id);
+
+  successResponse(res, null, 'Repository file tree synced successfully');
 }));
 
 export default router;

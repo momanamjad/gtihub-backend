@@ -36,6 +36,7 @@ export const createRepoValidator = Joi.object({
   description: Joi.string().max(500).allow(''),
   language: Joi.string().max(50),
   visibility: Joi.string().valid('public', 'private'),
+  addReadme: Joi.boolean(),
   fileTree: Joi.array().items(Joi.any()),
 });
 
