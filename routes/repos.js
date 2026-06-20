@@ -292,4 +292,26 @@ router.get('/:id/commits', optionalAuth, asyncHandler(async (req, res) => {
   successResponse(res, commits);
 }));
 
+router.get('/:id/branches', optionalAuth, asyncHandler(async (req, res) => {
+  const branches = await repoService.getBranches(req.params.id, req.user?.id);
+  successResponse(res, branches);
+}));
+
+router.post('/:id/branches', auth, asyncHandler(async (req, res) => {
+  const { name } = req.body;
+  const branches = await repoService.createBranch(req.params.id, req.user.id, name);
+  successResponse(res, branches, 'Branch created successfully', 201);
+}));
+
+router.get('/:id/tags', optionalAuth, asyncHandler(async (req, res) => {
+  const tags = await repoService.getTags(req.params.id, req.user?.id);
+  successResponse(res, tags);
+}));
+
+router.post('/:id/tags', auth, asyncHandler(async (req, res) => {
+  const { name } = req.body;
+  const tags = await repoService.createTag(req.params.id, req.user.id, name);
+  successResponse(res, tags, 'Tag created successfully', 201);
+}));
+
 export default router;

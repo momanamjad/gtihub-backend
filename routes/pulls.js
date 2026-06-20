@@ -1,6 +1,7 @@
 import express from 'express';
 import PullRequest from '../models/pullRequest.js';
 import Repository from '../models/repository.js';
+import Notification from '../models/notification.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
 import { successResponse, errorResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
@@ -19,11 +20,11 @@ router.get('/', optionalAuth, asyncHandler(async (req, res) => {
     throw new AppError('Unauthorized access to private repository', 403);
   }
 
-  const prs = await PullRequest.find({ repository: repoId })
+  const pr = await PullRequest.find({ repository: repoId })
     .populate('author', 'login avatar_url')
     .sort('-createdAt');
   
-  successResponse(res, prs);
+  successResponse(res, pr);
 }));
 
 // Create a Pull Request
@@ -52,6 +53,21 @@ router.post('/', auth, asyncHandler(async (req, res) => {
   // Record contribution
   await recordContribution(req.user.id, 'pr_created', repoId);
   
+  // Trigger notification to repository owner
+  if (repo.owner.toString() !== req.user.id) {
+    try {
+      await new Notification({
+        user: repo.owner,
+        actor: req.user.id,
+        type: 'pr',
+        repository: repoId,
+        message: `opened a pull request: "${pr.title}" in ${repo.name}`
+      }).save();
+    } catch (notifErr) {
+      console.error('Failed to create PR notification:', notifErr);
+    }
+  }
+
   successResponse(res, pr, 'Pull Request created successfully', 201);
 }));
 
@@ -69,6 +85,21 @@ router.post('/:id/merge', auth, asyncHandler(async (req, res) => {
 
   pr.status = 'merged';
   await pr.save();
+
+  // Trigger notification to PR author
+  if (pr.author.toString() !== req.user.id) {
+    try {
+      await new Notification({
+        user: pr.author,
+        actor: req.user.id,
+        type: 'merge',
+        repository: repoId,
+        message: `merged your pull request: "${pr.title}"`
+      }).save();
+    } catch (notifErr) {
+      console.error('Failed to create merge notification:', notifErr);
+    }
+  }
 
   successResponse(res, pr, 'Pull Request merged successfully');
 }));

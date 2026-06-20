@@ -189,6 +189,22 @@ export const createIssue = async (repoId, userId, issueData) => {
   // Record contribution
   await recordContribution(userId, 'issue_created', repoId);
 
+  // Trigger Notification to repository owner
+  if (repo.owner.toString() !== userId.toString()) {
+    try {
+      await new Notification({
+        user: repo.owner,
+        actor: userId,
+        type: 'issue',
+        repository: repoId,
+        issue: issue._id,
+        message: `opened a new issue: "${issue.title}"`
+      }).save();
+    } catch (notifErr) {
+      console.error('Failed to save issue notification:', notifErr);
+    }
+  }
+
   return issue;
 };
 
@@ -365,4 +381,60 @@ export const getRepoCommits = async (repoId, viewerId) => {
   .sort('-created_at');
 
   return commits;
+};
+
+export const getBranches = async (repoId, viewerId) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.visibility === 'private' && (!viewerId || repo.owner.toString() !== viewerId.toString())) {
+    throw new AppError('Unauthorized', 403);
+  }
+  return repo.branches || ['main'];
+};
+
+export const createBranch = async (repoId, userId, branchName) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.owner.toString() !== userId.toString()) throw new AppError('Unauthorized', 401);
+
+  if (!branchName || typeof branchName !== 'string' || !branchName.trim()) {
+    throw new AppError('Invalid branch name', 400);
+  }
+
+  const cleanName = branchName.trim();
+  if (repo.branches.includes(cleanName)) {
+    throw new AppError('Branch already exists', 400);
+  }
+
+  repo.branches.push(cleanName);
+  await repo.save();
+  return repo.branches;
+};
+
+export const getTags = async (repoId, viewerId) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.visibility === 'private' && (!viewerId || repo.owner.toString() !== viewerId.toString())) {
+    throw new AppError('Unauthorized', 403);
+  }
+  return repo.tags || [];
+};
+
+export const createTag = async (repoId, userId, tagName) => {
+  const repo = await Repository.findById(repoId);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.owner.toString() !== userId.toString()) throw new AppError('Unauthorized', 401);
+
+  if (!tagName || typeof tagName !== 'string' || !tagName.trim()) {
+    throw new AppError('Invalid tag name', 400);
+  }
+
+  const cleanName = tagName.trim();
+  if (repo.tags.includes(cleanName)) {
+    throw new AppError('Tag already exists', 400);
+  }
+
+  repo.tags.push(cleanName);
+  await repo.save();
+  return repo.tags;
 };

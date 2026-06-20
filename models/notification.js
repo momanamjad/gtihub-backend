@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const notificationSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   actor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  type: { type: String, enum: ['follow', 'star', 'issue', 'comment'], required: true },
+  type: { type: String, enum: ['follow', 'star', 'issue', 'comment', 'pr', 'merge'], required: true },
   repository: { type: mongoose.Schema.Types.ObjectId, ref: 'Repository' },
   issue: { type: mongoose.Schema.Types.ObjectId, ref: 'Issue' },
   message: { type: String, required: true },
