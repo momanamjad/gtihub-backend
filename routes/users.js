@@ -145,4 +145,10 @@ router.put('/notifications/:notificationId', auth, asyncHandler(async (req, res)
   successResponse(res, notification, 'Notification marked as read');
 }));
 
+router.get('/search', asyncHandler(async (req, res) => {
+  const { q, page = 1, limit = 10 } = req.query;
+  const { users, total } = await userService.searchUsers({ q, page, limit });
+  successResponse(res, { users, total });
+}));
+
 export default router;
