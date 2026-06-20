@@ -53,7 +53,7 @@ router.post('/', auth, asyncHandler(async (req, res) => {
     url: url || '',
     category: category || 'tools',
     creator: req.user.id,
-    downloads: Math.floor(Math.random() * 500) + 10 // realistic starting downloads
+    downloads: 0
   });
 
   await server.save();
