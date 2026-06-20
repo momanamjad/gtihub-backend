@@ -160,19 +160,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'Server is running' });
 });
 
-// Safe Debug Route
-app.get('/debug', (req, res) => {
-  const dbUri = process.env.MONGODB_URI || "";
-  const redactedUri = dbUri.trim().replace(/^["']|["']$/g, '').replace(/:([^@]+)@/, ':****@');
-  res.json({
-    node_env: process.env.NODE_ENV,
-    has_mongodb_uri: !!dbUri,
-    redacted_uri: redactedUri,
-    has_jwt_secret: !!process.env.JWT_SECRET,
-    mongodb_state: mongoose.connection.readyState,
-    allowed_origins: allowedOrigins
-  });
-});
+
 
 // API Routes
 app.get('/', (req, res) => res.json({ 
