@@ -6,6 +6,7 @@ import { auth, optionalAuth } from '../middleware/auth.js';
 import { successResponse, errorResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
 import { recordContribution } from '../services/userService.js';
+import Comment from '../models/comment.js';
 
 const router = express.Router({ mergeParams: true });
 
@@ -53,11 +54,23 @@ router.post('/', auth, asyncHandler(async (req, res) => {
   // Record contribution
   await recordContribution(req.user.id, 'pr_created', repoId);
   
-  // Trigger notification to repository owner
+  // Trigger notification to repository owner and watchers
+  const notifyUsers = new Set();
   if (repo.owner.toString() !== req.user.id) {
+    notifyUsers.add(repo.owner.toString());
+  }
+  if (repo.watchers && repo.watchers.length > 0) {
+    repo.watchers.forEach(watcherId => {
+      if (watcherId.toString() !== req.user.id) {
+        notifyUsers.add(watcherId.toString());
+      }
+    });
+  }
+
+  for (const targetUserId of notifyUsers) {
     try {
       await new Notification({
-        user: repo.owner,
+        user: targetUserId,
         actor: req.user.id,
         type: 'pr',
         repository: repoId,
@@ -86,15 +99,27 @@ router.post('/:id/merge', auth, asyncHandler(async (req, res) => {
   pr.status = 'merged';
   await pr.save();
 
-  // Trigger notification to PR author
+  // Trigger notification to PR author and watchers
+  const notifyUsers = new Set();
   if (pr.author.toString() !== req.user.id) {
+    notifyUsers.add(pr.author.toString());
+  }
+  if (repo.watchers && repo.watchers.length > 0) {
+    repo.watchers.forEach(watcherId => {
+      if (watcherId.toString() !== req.user.id) {
+        notifyUsers.add(watcherId.toString());
+      }
+    });
+  }
+
+  for (const targetUserId of notifyUsers) {
     try {
       await new Notification({
-        user: pr.author,
+        user: targetUserId,
         actor: req.user.id,
         type: 'merge',
         repository: repoId,
-        message: `merged your pull request: "${pr.title}"`
+        message: `merged pull request: "${pr.title}"`
       }).save();
     } catch (notifErr) {
       console.error('Failed to create merge notification:', notifErr);
@@ -102,6 +127,30 @@ router.post('/:id/merge', auth, asyncHandler(async (req, res) => {
   }
 
   successResponse(res, pr, 'Pull Request merged successfully');
+}));
+
+// GET comments for a pull request
+router.get('/:id/comments', optionalAuth, asyncHandler(async (req, res) => {
+  const comments = await Comment.find({ pullRequest: req.params.id })
+    .populate('author', 'login avatar_url')
+    .sort('createdAt');
+  successResponse(res, comments);
+}));
+
+// POST a new comment on a pull request
+router.post('/:id/comments', auth, asyncHandler(async (req, res) => {
+  const { body } = req.body;
+  if (!body) throw new AppError('Comment body is required', 400);
+
+  const comment = new Comment({
+    body,
+    author: req.user.id,
+    pullRequest: req.params.id
+  });
+
+  await comment.save();
+  await comment.populate('author', 'login avatar_url');
+  successResponse(res, comment, 'Comment posted successfully', 201);
 }));
 
 export default router;

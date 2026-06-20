@@ -9,6 +9,7 @@ const repositorySchema = new mongoose.Schema({
   stars_count: { type: Number, default: 0 },
   forks_count: { type: Number, default: 0 },
   watchers_count: { type: Number, default: 0 },
+  watchers: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], default: [] },
   issues_count: { type: Number, default: 0 },
   url: { type: String, default: "" },
   topics: [String],

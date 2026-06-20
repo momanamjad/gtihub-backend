@@ -17,6 +17,7 @@ import userRoutes from './routes/users.js';
 import pullRoutes from './routes/pulls.js';
 import discussionRoutes from './routes/discussions.js';
 import mcpRoutes from './routes/mcp.js';
+import copilotRoutes from './routes/copilot.js';
 
 // Import error handling
 import { errorHandler } from './utils/errorHandler.js';
@@ -122,6 +123,7 @@ app.use('/api/repos/:repoId/pulls', pullRoutes);
 app.use('/api/repos/:repoId/discussions', discussionRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/mcp', mcpRoutes);
+app.use('/api/copilot', copilotRoutes);
 
 // 404 Handler
 app.use((req, res) => {

@@ -74,6 +74,7 @@ export const getRepositoryById = async (repoId, viewerId) => {
   
   const repoObj = repo.toObject();
   repoObj.fileTree = await getRepoFileTree(repoId, viewerId);
+  repoObj.isWatching = viewerId ? (repo.watchers || []).some(id => id.toString() === viewerId.toString()) : false;
   return repoObj;
 };
 
@@ -189,11 +190,23 @@ export const createIssue = async (repoId, userId, issueData) => {
   // Record contribution
   await recordContribution(userId, 'issue_created', repoId);
 
-  // Trigger Notification to repository owner
+  // Trigger Notification to repository owner and watchers
+  const notifyUsers = new Set();
   if (repo.owner.toString() !== userId.toString()) {
+    notifyUsers.add(repo.owner.toString());
+  }
+  if (repo.watchers && repo.watchers.length > 0) {
+    repo.watchers.forEach(watcherId => {
+      if (watcherId.toString() !== userId.toString()) {
+        notifyUsers.add(watcherId.toString());
+      }
+    });
+  }
+
+  for (const targetUserId of notifyUsers) {
     try {
       await new Notification({
-        user: repo.owner,
+        user: targetUserId,
         actor: userId,
         type: 'issue',
         repository: repoId,

@@ -5,6 +5,8 @@ import { successResponse, paginatedResponse } from '../utils/responseFormatter.j
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
 import * as repoService from '../services/repoService.js';
+import Comment from '../models/comment.js';
+import Repository from '../models/repository.js';
 
 const router = express.Router();
 
@@ -177,6 +179,29 @@ router.post('/:id/pin', auth, asyncHandler(async (req, res) => {
   successResponse(res, result);
 }));
 
+router.post('/:id/watch', auth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
+  const userId = req.user.id;
+  const watchIndex = (repo.watchers || []).findIndex(id => id.toString() === userId.toString());
+
+  if (watchIndex === -1) {
+    repo.watchers.push(userId);
+    repo.watchers_count += 1;
+  } else {
+    repo.watchers.splice(watchIndex, 1);
+    repo.watchers_count = Math.max(0, repo.watchers_count - 1);
+  }
+
+  await repo.save();
+  successResponse(res, { 
+    message: watchIndex === -1 ? 'Watching' : 'Unwatching', 
+    watchers_count: repo.watchers_count,
+    isWatching: watchIndex === -1 
+  });
+}));
+
 /**
  * @swagger
  * /repos/search/query:
@@ -312,6 +337,30 @@ router.post('/:id/tags', auth, asyncHandler(async (req, res) => {
   const { name } = req.body;
   const tags = await repoService.createTag(req.params.id, req.user.id, name);
   successResponse(res, tags, 'Tag created successfully', 201);
+}));
+
+// GET comments for an issue
+router.get('/:id/issues/:issueId/comments', optionalAuth, asyncHandler(async (req, res) => {
+  const comments = await Comment.find({ issue: req.params.issueId })
+    .populate('author', 'login avatar_url')
+    .sort('createdAt');
+  successResponse(res, comments);
+}));
+
+// POST a new comment on an issue
+router.post('/:id/issues/:issueId/comments', auth, asyncHandler(async (req, res) => {
+  const { body } = req.body;
+  if (!body) throw new AppError('Comment body is required', 400);
+
+  const comment = new Comment({
+    body,
+    author: req.user.id,
+    issue: req.params.issueId
+  });
+
+  await comment.save();
+  await comment.populate('author', 'login avatar_url');
+  successResponse(res, comment, 'Comment posted successfully', 201);
 }));
 
 export default router;
