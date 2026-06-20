@@ -5,8 +5,23 @@ import { successResponse, paginatedResponse } from '../utils/responseFormatter.j
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
 import * as repoService from '../services/repoService.js';
+import crypto from 'crypto';
 import Comment from '../models/comment.js';
 import Repository from '../models/repository.js';
+import ProjectCard from '../models/project.js';
+import WorkflowRun from '../models/workflowRun.js';
+import Secret from '../models/secret.js';
+
+const ENCRYPTION_KEY = process.env.SECRET_ENCRYPTION_KEY || 'a_very_secure_and_long_32_byte_key_fallback';
+const IV_LENGTH = 16;
+
+function encrypt(text) {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY.padEnd(32).substring(0, 32)), iv);
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
 
 const router = express.Router();
 
@@ -361,6 +376,149 @@ router.post('/:id/issues/:issueId/comments', auth, asyncHandler(async (req, res)
   await comment.save();
   await comment.populate('author', 'login avatar_url');
   successResponse(res, comment, 'Comment posted successfully', 201);
+}));
+
+// Projects Board Endpoints
+router.get('/:id/projects', optionalAuth, asyncHandler(async (req, res) => {
+  const cards = await ProjectCard.find({ repository: req.params.id })
+    .populate('creator', 'login name avatar_url')
+    .sort('createdAt');
+  successResponse(res, cards);
+}));
+
+router.post('/:id/projects', auth, asyncHandler(async (req, res) => {
+  const { title, description, column } = req.body;
+  if (!title) throw new AppError('Title is required', 400);
+
+  const card = new ProjectCard({
+    repository: req.params.id,
+    title,
+    description: description || "",
+    column: column || "todo",
+    creator: req.user.id
+  });
+
+  await card.save();
+  await card.populate('creator', 'login name avatar_url');
+  successResponse(res, card, 'Card created successfully', 201);
+}));
+
+router.patch('/:id/projects/cards/:cardId', auth, asyncHandler(async (req, res) => {
+  const { title, description, column } = req.body;
+  const card = await ProjectCard.findById(req.params.cardId);
+  if (!card) throw new AppError('Card not found', 404);
+
+  if (title !== undefined) card.title = title;
+  if (description !== undefined) card.description = description;
+  if (column !== undefined) card.column = column;
+
+  await card.save();
+  successResponse(res, card, 'Card updated successfully');
+}));
+
+router.delete('/:id/projects/cards/:cardId', auth, asyncHandler(async (req, res) => {
+  const card = await ProjectCard.findById(req.params.cardId);
+  if (!card) throw new AppError('Card not found', 404);
+
+  await ProjectCard.deleteOne({ _id: req.params.cardId });
+  successResponse(res, null, 'Card deleted successfully');
+}));
+
+// Actions (Workflow Runs) Endpoints
+router.get('/:id/actions/runs', optionalAuth, asyncHandler(async (req, res) => {
+  const runs = await WorkflowRun.find({ repository: req.params.id })
+    .sort('-createdAt');
+  successResponse(res, runs);
+}));
+
+router.post('/:id/actions/runs', auth, asyncHandler(async (req, res) => {
+  const { branch } = req.body;
+  const mockLogs = [
+    "🚀 Starting build environment on runner host UBUNTU-LATEST...",
+    "🔧 Setup Node.js environment version v20.11.0...",
+    "📦 Loading dependency caching layers from cache key: node-modules-v1...",
+    "📥 Executing npm clean-install (npm ci)...",
+    "added 1204 packages in 4.25s",
+    "🧪 Executing unit test suite: npm run test...",
+    "PASS  src/tests/auth.test.js (5.42s)",
+    "PASS  src/tests/repos.test.js (3.11s)",
+    "✔ All unit and integration test runs passed successfully (18 tests)",
+    "🔧 Compiling production asset bundle: npm run build...",
+    "vite v7.3.3 building client environment for production...",
+    "transforming modules...",
+    "✓ 2513 modules transformed.",
+    "✓ production bundle compiled in 11.24s",
+    "🎉 Frontend bundle created successfully!",
+    "🚀 Launching deploy deployment task to edge network host...",
+    "📦 Syncing build assets with remote storage...",
+    "✅ Deployment live: https://github-kappa-two.vercel.app",
+    "🎉 Pipeline workflow run finished successfully with exit status: 0."
+  ];
+
+  const run = new WorkflowRun({
+    repository: req.params.id,
+    name: 'CI/CD Build & Deploy',
+    branch: branch || 'main',
+    status: 'success',
+    logs: mockLogs
+  });
+
+  await run.save();
+  successResponse(res, run, 'Workflow run triggered successfully', 201);
+}));
+
+// Secrets Management Endpoints
+router.get('/:id/secrets', auth, asyncHandler(async (req, res) => {
+  // Check authorization - only owners can list secrets
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.owner.toString() !== req.user.id.toString()) throw new AppError('Unauthorized', 401);
+
+  // Find secrets but explicitly omit the encrypted 'value' field!
+  const secrets = await Secret.find({ repository: req.params.id }, '-value')
+    .sort('-createdAt');
+  successResponse(res, secrets);
+}));
+
+router.post('/:id/secrets', auth, asyncHandler(async (req, res) => {
+  const { name, value } = req.body;
+  if (!name || !name.trim()) throw new AppError('Secret name is required', 400);
+  if (!value || !value.trim()) throw new AppError('Secret value is required', 400);
+
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.owner.toString() !== req.user.id.toString()) throw new AppError('Unauthorized', 401);
+
+  const cleanName = name.trim().toUpperCase();
+  const encryptedValue = encrypt(value);
+
+  // Check if secret already exists to update it, or create a new one
+  let secret = await Secret.findOne({ repository: req.params.id, name: cleanName });
+  if (secret) {
+    secret.value = encryptedValue;
+  } else {
+    secret = new Secret({
+      repository: req.params.id,
+      name: cleanName,
+      value: encryptedValue
+    });
+  }
+
+  await secret.save();
+  // Return the secret name, omit value
+  successResponse(res, { _id: secret._id, name: secret.name, created_at: secret.created_at }, 'Secret saved successfully');
+}));
+
+router.delete('/:id/secrets/:secretId', auth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.owner.toString() !== req.user.id.toString()) throw new AppError('Unauthorized', 401);
+
+  const secret = await Secret.findById(req.params.secretId);
+  if (!secret) throw new AppError('Secret not found', 404);
+
+  await Secret.deleteOne({ _id: req.params.secretId });
+  successResponse(res, null, 'Secret deleted successfully');
 }));
 
 export default router;

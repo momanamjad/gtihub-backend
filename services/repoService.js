@@ -122,15 +122,17 @@ export const toggleStar = async (repoId, userId) => {
   await new Star({ user: userId, repository: repoId }).save();
   await Repository.findByIdAndUpdate(repoId, { $inc: { stars_count: 1 } });
 
-  // Create notification
-  const owner = await User.findById(repo.owner);
-  await new Notification({
-    user: repo.owner,
-    actor: userId,
-    type: 'star',
-    repository: repoId,
-    message: `${owner.login} starred your repository`,
-  }).save();
+  // Create notification if starring someone else's repo
+  if (repo.owner.toString() !== userId.toString()) {
+    const actorUser = await User.findById(userId);
+    await new Notification({
+      user: repo.owner,
+      actor: userId,
+      type: 'star',
+      repository: repoId,
+      message: `${actorUser?.login || 'Someone'} starred your repository`,
+    }).save();
+  }
 
   return { message: 'Starred' };
 };
@@ -402,7 +404,11 @@ export const getBranches = async (repoId, viewerId) => {
   if (repo.visibility === 'private' && (!viewerId || repo.owner.toString() !== viewerId.toString())) {
     throw new AppError('Unauthorized', 403);
   }
-  return repo.branches || ['main'];
+  let branchesList = repo.branches || [];
+  if (branchesList.length === 0 || !branchesList.includes('main')) {
+    branchesList = ['main', ...branchesList];
+  }
+  return branchesList;
 };
 
 export const createBranch = async (repoId, userId, branchName) => {
@@ -415,6 +421,13 @@ export const createBranch = async (repoId, userId, branchName) => {
   }
 
   const cleanName = branchName.trim();
+  
+  if (!repo.branches || repo.branches.length === 0) {
+    repo.branches = ['main'];
+  } else if (!repo.branches.includes('main')) {
+    repo.branches.unshift('main');
+  }
+
   if (repo.branches.includes(cleanName)) {
     throw new AppError('Branch already exists', 400);
   }

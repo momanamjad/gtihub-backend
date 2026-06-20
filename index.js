@@ -6,6 +6,9 @@ import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
+import http from 'http';
+import { Server } from 'socket.io';
+import { notificationEmitter } from './utils/eventEmitter.js';
 
 // Import Swagger config
 import swaggerDocs from './config/swagger.js';
@@ -18,6 +21,7 @@ import pullRoutes from './routes/pulls.js';
 import discussionRoutes from './routes/discussions.js';
 import mcpRoutes from './routes/mcp.js';
 import copilotRoutes from './routes/copilot.js';
+import uploadRoutes from './routes/upload.js';
 
 // Import error handling
 import { errorHandler } from './utils/errorHandler.js';
@@ -25,11 +29,45 @@ import { errorHandler } from './utils/errorHandler.js';
 dotenv.config();
 
 const app = express();
+const server = http.createServer(app);
 
 // CORS Configuration
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
-  : ['http://localhost:3000', 'http://localhost:5000', 'http://localhost:5173', 'http://localhost:5174'];
+  : ['http://localhost:3000', 'http://localhost:5000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'];
+
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST"]
+  }
+});
+
+const userSockets = new Map();
+
+io.on('connection', (socket) => {
+  socket.on('register', (userId) => {
+    userSockets.set(userId, socket.id);
+  });
+
+  socket.on('disconnect', () => {
+    for (const [userId, socketId] of userSockets.entries()) {
+      if (socketId === socket.id) {
+        userSockets.delete(userId);
+        break;
+      }
+    }
+  });
+});
+
+notificationEmitter.on('newNotification', (notification) => {
+  const recipientId = notification.user.toString();
+  const socketId = userSockets.get(recipientId);
+  if (socketId) {
+    io.to(socketId).emit('notification', notification);
+  }
+});
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -46,13 +84,8 @@ app.use(cors({
 
 // Security Middleware
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-    },
-  },
+  crossOriginResourcePolicy: false,
+  contentSecurityPolicy: false,
 }));
 
 // Rate Limiting
@@ -124,6 +157,8 @@ app.use('/api/repos/:repoId/discussions', discussionRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/mcp', mcpRoutes);
 app.use('/api/copilot', copilotRoutes);
+app.use('/api/upload', uploadRoutes);
+app.use('/uploads', express.static('public/uploads'));
 
 // 404 Handler
 app.use((req, res) => {
@@ -140,7 +175,7 @@ const PORT = process.env.PORT || 5000;
 
 // Only listen if not in Vercel environment
 if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`📚 API Docs available at http://localhost:${PORT}/api/docs`);
   });
