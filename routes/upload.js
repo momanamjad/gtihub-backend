@@ -8,9 +8,13 @@ import { AppError } from "../utils/errorHandler.js";
 const router = express.Router();
 
 // Ensure upload directory exists
-const uploadDir = "./public/uploads";
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+const uploadDir = process.env.VERCEL ? "/tmp" : "./public/uploads";
+if (!process.env.VERCEL && !fs.existsSync(uploadDir)) {
+  try {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  } catch (err) {
+    console.error("Failed to create upload directory:", err);
+  }
 }
 
 // Multer storage configuration
