@@ -88,6 +88,8 @@ app.use(cors({
   credentials: true,
 }));
 
+app.options('*', cors());
+
 // Security Middleware
 app.use(helmet({
   crossOriginResourcePolicy: false,
