@@ -125,10 +125,15 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Database Connection
-if (!process.env.MONGODB_URI) {
+let dbUri = process.env.MONGODB_URI;
+if (dbUri) {
+  dbUri = dbUri.trim().replace(/^["']|["']$/g, '');
+}
+
+if (!dbUri) {
   console.error('❌ Connection Error: MONGODB_URI environment variable is not defined!');
 } else {
-  mongoose.connect(process.env.MONGODB_URI)
+  mongoose.connect(dbUri)
     .then(() => console.log('✅ Connected to MongoDB'))
     .catch((err) => console.error('❌ Connection Error:', err.message));
 }
