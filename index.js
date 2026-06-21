@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'path';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -177,7 +178,17 @@ app.use('/api/users', userRoutes);
 app.use('/api/mcp', mcpRoutes);
 app.use('/api/copilot', copilotRoutes);
 app.use('/api/upload', uploadRoutes);
-app.use('/uploads', express.static('public/uploads'));
+app.get('/uploads/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const filePath = process.env.VERCEL 
+    ? path.join('/tmp', filename)
+    : path.resolve('public/uploads', filename);
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      res.status(404).json({ success: false, message: 'Image not found' });
+    }
+  });
+});
 
 // 404 Handler
 app.use((req, res) => {
