@@ -1,4 +1,7 @@
 import express from 'express';
+import { OAuth2Client } from 'google-auth-library';
+import bcrypt from 'bcryptjs';
+import User from '../models/user.js';
 import { validateRequest, validateQuery } from '../utils/validate.js';
 import {
   registerValidator,
@@ -215,6 +218,88 @@ router.post('/refresh', asyncHandler(async (req, res) => {
 router.post('/logout', asyncHandler(async (req, res) => {
   clearTokenCookies(res);
   successResponse(res, null, 'Logged out successfully');
+}));
+
+/**
+ * @swagger
+ * /auth/google-signin:
+ *   post:
+ *     summary: Sign in or register with Google
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [credential]
+ *             properties:
+ *               credential: { type: string }
+ */
+router.post('/google-signin', asyncHandler(async (req, res) => {
+  const { credential } = req.body;
+  if (!credential) {
+    throw new AppError('Google credential token is required', 400);
+  }
+
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    console.warn('WARNING: GOOGLE_CLIENT_ID is not configured in environment variables.');
+  }
+
+  let payload;
+  try {
+    const client = new OAuth2Client(clientId);
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: clientId,
+    });
+    payload = ticket.getPayload();
+  } catch (err) {
+    throw new AppError('Invalid Google credential token: ' + err.message, 400);
+  }
+
+  if (!payload || !payload.email) {
+    throw new AppError('Failed to retrieve user email from Google credential', 400);
+  }
+
+  const { email, name, picture } = payload;
+
+  let user = await User.findOne({ email });
+
+  if (!user) {
+    // Generate unique login username
+    let baseLogin = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    if (!baseLogin) baseLogin = 'user';
+    
+    let login = baseLogin;
+    let counter = 1;
+    while (await User.findOne({ login })) {
+      login = `${baseLogin}${counter}`;
+      counter++;
+    }
+
+    // Generate a secure random password for DB requirement
+    const randomPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).toUpperCase().slice(-10);
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(randomPassword, salt);
+
+    user = new User({
+      login,
+      email,
+      password: hashedPassword,
+      name: name || login,
+      avatar_url: picture || '',
+    });
+    await user.save();
+  }
+
+  const { accessToken, refreshToken } = authService.generateTokens(user.id);
+  const userObj = user.toObject();
+  delete userObj.password;
+
+  setTokenCookies(res, accessToken, refreshToken);
+  successResponse(res, { accessToken, refreshToken, user: userObj }, 'Google sign-in successful');
 }));
 
 export default router;
