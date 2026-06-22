@@ -1,7 +1,9 @@
 import express from 'express';
+import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import bcrypt from 'bcryptjs';
 import User from '../models/user.js';
+import { sendResetEmail } from '../services/emailService.js';
 import { validateRequest, validateQuery } from '../utils/validate.js';
 import {
   registerValidator,
@@ -300,6 +302,103 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
 
   setTokenCookies(res, accessToken, refreshToken);
   successResponse(res, { accessToken, refreshToken, user: userObj }, 'Google sign-in successful');
+}));
+
+/**
+ * @swagger
+ * /auth/forgot-password:
+ *   post:
+ *     summary: Request a password reset email
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email]
+ *             properties:
+ *               email: { type: string }
+ */
+router.post('/forgot-password', asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    throw new AppError('Email is required', 400);
+  }
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    // Return success to prevent email enumeration attacks
+    return successResponse(res, null, 'If that email address exists in our database, we will send a password reset link.');
+  }
+
+  // Generate secure random reset token
+  const resetToken = crypto.randomBytes(20).toString('hex');
+  user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+  user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
+
+  await user.save();
+
+  // Create reset link
+  const origin = req.headers.referer || req.headers.origin || 'http://localhost:5173';
+  const parsedOrigin = new URL(origin);
+  const resetUrl = `${parsedOrigin.origin}/reset-password?token=${resetToken}`;
+
+  await sendResetEmail(user.email, resetUrl);
+
+  successResponse(res, null, 'If that email address exists in our database, we will send a password reset link.');
+}));
+
+/**
+ * @swagger
+ * /auth/reset-password:
+ *   post:
+ *     summary: Reset password using the secure token
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token, password]
+ *             properties:
+ *               token: { type: string }
+ *               password: { type: string }
+ */
+router.post('/reset-password', asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) {
+    throw new AppError('Token and password are required', 400);
+  }
+
+  // Verify password requirements
+  if (password.length < 6) {
+    throw new AppError('Password must be at least 6 characters long', 400);
+  }
+
+  const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+  const user = await User.findOne({
+    resetPasswordToken: hashedToken,
+    resetPasswordExpires: { $gt: Date.now() }
+  });
+
+  if (!user) {
+    throw new AppError('Password reset token is invalid or has expired', 400);
+  }
+
+  // Update password and hash it
+  const salt = await bcrypt.genSalt(10);
+  user.password = await bcrypt.hash(password, salt);
+  
+  // Clear reset token fields
+  user.resetPasswordToken = "";
+  user.resetPasswordExpires = undefined;
+
+  await user.save();
+
+  successResponse(res, null, 'Password reset successful. You can now log in.');
 }));
 
 export default router;

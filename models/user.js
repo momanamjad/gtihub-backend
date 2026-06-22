@@ -19,6 +19,8 @@ const userSchema = new mongoose.Schema({
   followers_count: { type: Number, default: 0 },
   following_count: { type: Number, default: 0 },
   public_repos_count: { type: Number, default: 0 },
+  resetPasswordToken: { type: String, default: "" },
+  resetPasswordExpires: { type: Date },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 userSchema.index({ login: 'text', name: 'text' });
