@@ -10,26 +10,52 @@ import { AppError } from '../utils/errorHandler.js';
 import { recordContribution } from './userService.js';
 
 export const createRepository = async (userId, repoData) => {
-  const { addReadme, ...restData } = repoData;
   const repo = new Repository({ 
-    ...restData, 
+    ...repoData, 
     owner: userId 
   });
   await repo.save();
 
-  if (addReadme) {
-    // Create default file nodes in FileNode collection
-    const defaultTree = [
-      { repository: repo._id, type: 'dir', name: 'src', path: 'src', parentPath: '' },
-      { repository: repo._id, type: 'file', name: 'README.md', path: 'README.md', content: `# ${repoData.name}\n`, parentPath: '' }
-    ];
-    await FileNode.insertMany(defaultTree);
-  }
+  const user = await User.findById(userId);
+  const username = user?.login || 'momanamjad';
+  const commitHash = Math.random().toString(16).substring(2, 9);
+
+  // Create default file nodes in FileNode collection
+  const defaultTree = [
+    { 
+      repository: repo._id, 
+      branch: 'main',
+      type: 'dir', 
+      name: 'src', 
+      path: 'src', 
+      parentPath: '', 
+      lastCommitMessage: 'Initial commit', 
+      lastCommitAuthor: username, 
+      lastCommitDate: new Date() 
+    },
+    { 
+      repository: repo._id, 
+      branch: 'main',
+      type: 'file', 
+      name: 'README.md', 
+      path: 'README.md', 
+      content: `# ${repoData.name}\n`, 
+      parentPath: '', 
+      lastCommitMessage: 'Initial commit', 
+      lastCommitAuthor: username, 
+      lastCommitDate: new Date() 
+    }
+  ];
+  await FileNode.insertMany(defaultTree);
 
   await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
   
   // Record contribution
-  await recordContribution(userId, 'repo_created', repo._id);
+  await recordContribution(userId, 'repo_created', repo._id, {
+    commitMessage: 'Initial commit',
+    commitAuthor: username,
+    commitHash
+  });
   
   return repo;
 };
@@ -125,6 +151,9 @@ export const toggleStar = async (repoId, userId) => {
   await new Star({ user: userId, repository: repoId }).save();
   await Repository.findByIdAndUpdate(repoId, { $inc: { stars_count: 1 } });
 
+  // Record contribution
+  await recordContribution(userId, 'repo_starred', repoId);
+
   // Create notification if starring someone else's repo
   if (repo.owner.toString() !== userId.toString()) {
     const actorUser = await User.findById(userId);
@@ -165,17 +194,67 @@ export const togglePin = async (repoId, userId) => {
 
 export const searchRepositories = async ({ q, page = 1, limit = 10, language = null }) => {
   const skip = (page - 1) * limit;
-  const query = { visibility: 'public', is_deleted: false };
+  const query = { is_deleted: false };
   
-  if (language) query.language = language;
+  // Default to public visibility unless specifically searched
+  query.visibility = 'public';
 
-  const repos = await Repository.find(query)
-    .find({ $text: { $search: q } })
+  let searchString = q || "";
+
+  // Parse stars:>N or stars:<N
+  const starsMatch = searchString.match(/stars:([><=]\d+)/);
+  if (starsMatch) {
+    const op = starsMatch[1][0];
+    const val = parseInt(starsMatch[1].substring(1), 10);
+    if (op === '>') query.stars_count = { $gt: val };
+    else if (op === '<') query.stars_count = { $lt: val };
+    searchString = searchString.replace(/stars:[><=]\d+/, '').trim();
+  }
+
+  // Parse forks:>N or forks:<N
+  const forksMatch = searchString.match(/forks:([><=]\d+)/);
+  if (forksMatch) {
+    const op = forksMatch[1][0];
+    const val = parseInt(forksMatch[1].substring(1), 10);
+    if (op === '>') query.forks_count = { $gt: val };
+    else if (op === '<') query.forks_count = { $lt: val };
+    searchString = searchString.replace(/forks:[><=]\d+/, '').trim();
+  }
+
+  // Parse language:Lang
+  const langMatch = searchString.match(/language:([^\s]+)/);
+  if (langMatch) {
+    query.language = new RegExp('^' + langMatch[1] + '$', 'i');
+    searchString = searchString.replace(/language:[^\s]+/, '').trim();
+  } else if (language) {
+    query.language = new RegExp('^' + language + '$', 'i');
+  }
+
+  // Parse visibility:Visibility
+  const visMatch = searchString.match(/visibility:([^\s]+)/);
+  if (visMatch) {
+    const vis = visMatch[1].toLowerCase();
+    if (vis === 'public' || vis === 'private') {
+      query.visibility = vis;
+    }
+    searchString = searchString.replace(/visibility:[^\s]+/, '').trim();
+  }
+
+  let dbQuery = Repository.find(query);
+  if (searchString) {
+    dbQuery = dbQuery.find({ $text: { $search: searchString } });
+  }
+
+  const repos = await dbQuery
     .populate('owner', 'login avatar_url')
     .skip(skip)
     .limit(limit);
 
-  const total = await Repository.countDocuments(query);
+  const countQuery = { ...query };
+  if (searchString) {
+    countQuery.$text = { $search: searchString };
+  }
+  const total = await Repository.countDocuments(countQuery);
 
   return { repos, total };
 };
@@ -258,7 +337,7 @@ export const updateIssue = async (repoId, issueId, userId, updateData) => {
   const issue = await Issue.findOne({ _id: issueId, repository: repoId, is_deleted: false });
   if (!issue) throw new AppError('Issue not found', 404);
 
-  const allowedFields = ['title', 'description', 'state', 'labels', 'assignee'];
+  const allowedFields = ['title', 'description', 'state', 'labels', 'assignee', 'milestone'];
   for (const field of allowedFields) {
     if (updateData[field] !== undefined) {
       if (field === 'assignee') {
@@ -289,14 +368,25 @@ export const updateIssue = async (repoId, issueId, userId, updateData) => {
     .populate('assignee', 'login avatar_url');
 };
 
-export const getRepoFileTree = async (repoId, viewerId) => {
+const buildBranchQuery = (repoId, branch, extra = {}) => {
+  const query = { repository: repoId, ...extra };
+  if (branch === 'main') {
+    query.$or = [{ branch: 'main' }, { branch: { $exists: false } }, { branch: null }];
+  } else {
+    query.branch = branch;
+  }
+  return query;
+};
+
+export const getRepoFileTree = async (repoId, viewerId, branch = 'main') => {
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
   if (repo.visibility === 'private' && (!viewerId || repo.owner.toString() !== viewerId.toString())) {
     throw new AppError('Unauthorized', 403);
   }
 
-  const flatNodes = await FileNode.find({ repository: repoId }).lean();
+  const query = buildBranchQuery(repoId, branch);
+  const flatNodes = await FileNode.find(query).lean();
   
   const buildTree = (parentPath = '') => {
     return flatNodes
@@ -307,7 +397,10 @@ export const getRepoFileTree = async (repoId, viewerId) => {
           name: n.name,
           path: n.path,
           type: n.type,
-          content: n.content
+          content: n.content,
+          lastCommitMessage: n.lastCommitMessage || 'Initial commit',
+          lastCommitAuthor: n.lastCommitAuthor || 'momanamjad',
+          lastCommitDate: n.lastCommitDate || n.updated_at || new Date()
         };
         if (n.type === 'dir') {
           item.children = buildTree(n.path);
@@ -319,39 +412,92 @@ export const getRepoFileTree = async (repoId, viewerId) => {
   return buildTree('');
 };
 
-export const addRepoFileNode = async (repoId, userId, { name, path, type, content, parentPath }) => {
+const propagateDirectoryCommit = async (repoId, branch, parentPath, commitMessage, commitAuthor, commitDate) => {
+  if (!parentPath) return;
+  const parts = parentPath.split('/');
+  for (let i = 1; i <= parts.length; i++) {
+    const currentDirPath = parts.slice(0, i).join('/');
+    const query = buildBranchQuery(repoId, branch, { path: currentDirPath, type: 'dir' });
+    await FileNode.findOneAndUpdate(
+      query,
+      { 
+        lastCommitMessage: commitMessage, 
+        lastCommitAuthor: commitAuthor, 
+        lastCommitDate: commitDate 
+      }
+    );
+  }
+};
+
+export const addRepoFileNode = async (repoId, userId, { name, path, type, content, parentPath, commitMessage, branch = 'main' }) => {
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
   if (repo.owner.toString() !== userId.toString()) throw new AppError('Unauthorized', 401);
 
-  const existing = await FileNode.findOne({ repository: repoId, path });
+  const query = buildBranchQuery(repoId, branch, { path });
+  const existing = await FileNode.findOne(query);
   if (existing) throw new AppError('File or directory already exists', 400);
 
-  const node = new FileNode({ repository: repoId, name, path, type, content, parentPath });
+  const user = await User.findById(userId);
+  const username = user?.login || 'momanamjad';
+  const msg = commitMessage || `Create ${name}`;
+  const commitDate = new Date();
+  const commitHash = Math.random().toString(16).substring(2, 9);
+
+  const node = new FileNode({ 
+    repository: repoId, 
+    branch,
+    name, 
+    path, 
+    type, 
+    content, 
+    parentPath,
+    lastCommitMessage: msg,
+    lastCommitAuthor: username,
+    lastCommitDate: commitDate
+  });
   await node.save();
+
+  // Propagate commit message to parent directories recursively
+  await propagateDirectoryCommit(repoId, branch, parentPath, msg, username, commitDate);
   
   // Record contribution
-  await recordContribution(userId, 'file_created', repoId);
+  await recordContribution(userId, 'file_created', repoId, {
+    commitMessage: msg,
+    commitAuthor: username,
+    commitHash
+  });
   
   return node;
 };
 
-export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, content }) => {
+export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, content, commitMessage, branch = 'main' }) => {
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
   if (repo.owner.toString() !== userId.toString()) throw new AppError('Unauthorized', 401);
 
-  const node = await FileNode.findOne({ repository: repoId, path: oldPath });
+  const query = buildBranchQuery(repoId, branch, { path: oldPath });
+  const node = await FileNode.findOne(query);
   if (!node) throw new AppError('File not found', 404);
+
+  const user = await User.findById(userId);
+  const username = user?.login || 'momanamjad';
+  const msg = commitMessage || `Update ${node.name}`;
+  const commitDate = new Date();
+  const commitHash = Math.random().toString(16).substring(2, 9);
 
   if (name) node.name = name;
   if (path) {
     const oldPrefix = oldPath + '/';
     const newPrefix = path + '/';
-    const children = await FileNode.find({ repository: repoId, path: new RegExp('^' + oldPrefix) });
+    const childrenQuery = buildBranchQuery(repoId, branch, { path: new RegExp('^' + oldPrefix) });
+    const children = await FileNode.find(childrenQuery);
     for (const child of children) {
       child.path = child.path.replace(oldPrefix, newPrefix);
       child.parentPath = child.parentPath.replace(oldPath, path);
+      child.lastCommitMessage = msg;
+      child.lastCommitAuthor = username;
+      child.lastCommitDate = commitDate;
       await child.save();
     }
     node.path = path;
@@ -359,24 +505,37 @@ export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, 
   }
   if (content !== undefined) node.content = content;
 
+  node.lastCommitMessage = msg;
+  node.lastCommitAuthor = username;
+  node.lastCommitDate = commitDate;
+
   await node.save();
+
+  // Propagate commit message to parent directories recursively
+  await propagateDirectoryCommit(repoId, branch, node.parentPath, msg, username, commitDate);
   
   // Record contribution
-  await recordContribution(userId, 'file_updated', repoId);
+  await recordContribution(userId, 'file_updated', repoId, {
+    commitMessage: msg,
+    commitAuthor: username,
+    commitHash
+  });
   
   return node;
 };
 
-export const deleteRepoFileNode = async (repoId, userId, path) => {
+export const deleteRepoFileNode = async (repoId, userId, path, branch = 'main') => {
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
   if (repo.owner.toString() !== userId.toString()) throw new AppError('Unauthorized', 401);
 
-  const node = await FileNode.findOne({ repository: repoId, path });
+  const query = buildBranchQuery(repoId, branch, { path });
+  const node = await FileNode.findOne(query);
   if (!node) throw new AppError('File not found', 404);
 
   if (node.type === 'dir') {
-    await FileNode.deleteMany({ repository: repoId, path: new RegExp('^' + path + '(/|$)') });
+    const childrenQuery = buildBranchQuery(repoId, branch, { path: new RegExp('^' + path + '(/|$)') });
+    await FileNode.deleteMany(childrenQuery);
   } else {
     await node.deleteOne();
   }
@@ -435,9 +594,91 @@ export const createBranch = async (repoId, userId, branchName) => {
     throw new AppError('Branch already exists', 400);
   }
 
+  // Clone base branch's file tree to the new branch
+  const baseBranch = repo.branches.includes('main') ? 'main' : repo.branches[0] || 'main';
+  const baseQuery = buildBranchQuery(repoId, baseBranch);
+  const baseNodes = await FileNode.find(baseQuery).lean();
+  const newNodes = baseNodes.map(node => {
+    const { _id, createdAt, updatedAt, ...rest } = node;
+    return {
+      ...rest,
+      branch: cleanName
+    };
+  });
+  if (newNodes.length > 0) {
+    await FileNode.insertMany(newNodes);
+  }
+
   repo.branches.push(cleanName);
   await repo.save();
   return repo.branches;
+};
+
+export const compareBranches = async (repoId, sourceBranch, targetBranch) => {
+  const sourceQuery = buildBranchQuery(repoId, sourceBranch, { type: 'file' });
+  const targetQuery = buildBranchQuery(repoId, targetBranch, { type: 'file' });
+  const sourceNodes = await FileNode.find(sourceQuery).lean();
+  const targetNodes = await FileNode.find(targetQuery).lean();
+
+  const sourceMap = new Map(sourceNodes.map(n => [n.path, n]));
+  const targetMap = new Map(targetNodes.map(n => [n.path, n]));
+
+  const diffs = [];
+
+  // Find added and modified files
+  for (const [path, sourceNode] of sourceMap.entries()) {
+    const targetNode = targetMap.get(path);
+    if (!targetNode) {
+      // Added file
+      diffs.push({
+        path,
+        status: 'added',
+        additions: sourceNode.content.split('\n').length,
+        deletions: 0,
+        diffLines: sourceNode.content.split('\n').map((line, idx) => ({ type: 'addition', content: line, number: idx + 1 }))
+      });
+    } else if (sourceNode.content !== targetNode.content) {
+      // Modified file
+      const sourceLines = sourceNode.content.split('\n');
+      const targetLines = targetNode.content.split('\n');
+      const diffLines = [];
+      let additions = 0;
+      let deletions = 0;
+
+      // Show old lines as deleted, new lines as added
+      targetLines.forEach((line, idx) => {
+        diffLines.push({ type: 'deletion', content: line, number: idx + 1 });
+        deletions++;
+      });
+      sourceLines.forEach((line, idx) => {
+        diffLines.push({ type: 'addition', content: line, number: idx + 1 });
+        additions++;
+      });
+
+      diffs.push({
+        path,
+        status: 'modified',
+        additions,
+        deletions,
+        diffLines
+      });
+    }
+  }
+
+  // Find deleted files
+  for (const [path, targetNode] of targetMap.entries()) {
+    if (!sourceMap.has(path)) {
+      diffs.push({
+        path,
+        status: 'deleted',
+        additions: 0,
+        deletions: targetNode.content.split('\n').length,
+        diffLines: targetNode.content.split('\n').map((line, idx) => ({ type: 'deletion', content: line, number: idx + 1 }))
+      });
+    }
+  }
+
+  return diffs;
 };
 
 export const getTags = async (repoId, viewerId) => {

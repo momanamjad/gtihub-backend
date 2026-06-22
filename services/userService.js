@@ -7,13 +7,14 @@ import Notification from '../models/notification.js';
 import Contribution from '../models/contribution.js';
 import { AppError } from '../utils/errorHandler.js';
 
-export const recordContribution = async (userId, type, repositoryId = null) => {
+export const recordContribution = async (userId, type, repositoryId = null, extraData = {}) => {
   try {
     const contribution = new Contribution({
       user: userId,
       type,
       repository: repositoryId,
-      count: 1
+      count: 1,
+      ...extraData
     });
     await contribution.save();
   } catch (err) {
@@ -132,6 +133,9 @@ export const followUser = async (userId, userToFollowId) => {
   await User.findByIdAndUpdate(userToFollowId, { $inc: { followers_count: 1 } });
   await User.findByIdAndUpdate(userId, { $inc: { following_count: 1 } });
 
+  // Record contribution
+  await recordContribution(userId, 'user_followed', null, { targetUser: userToFollowId });
+
   // Create notification
   await new Notification({
     user: userToFollowId,
@@ -190,4 +194,32 @@ export const markNotificationAsRead = async (notificationId) => {
 
   if (!notification) throw new AppError('Notification not found', 404);
   return notification;
+};
+
+export const getActivityFeed = async (userId, { page = 1, limit = 20 }) => {
+  const skip = (page - 1) * limit;
+
+  // Get followed users
+  const followedRelations = await Follower.find({ follower: userId }).select('following');
+  const followedUserIds = followedRelations.map(r => r.following);
+
+  // Include user's own activity as well
+  const targetUserIds = [userId, ...followedUserIds];
+
+  // Retrieve contributions
+  const contributions = await Contribution.find({ user: { $in: targetUserIds } })
+    .populate('user', 'login avatar_url')
+    .populate({
+      path: 'repository',
+      select: 'name owner visibility description forks_count stars_count language',
+      populate: { path: 'owner', select: 'login avatar_url' }
+    })
+    .populate('targetUser', 'login avatar_url')
+    .sort('-created_at')
+    .skip(skip)
+    .limit(limit);
+
+  const total = await Contribution.countDocuments({ user: { $in: targetUserIds } });
+
+  return { feed: contributions, total };
 };

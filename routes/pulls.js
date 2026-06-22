@@ -153,4 +153,43 @@ router.post('/:id/comments', auth, asyncHandler(async (req, res) => {
   successResponse(res, comment, 'Comment posted successfully', 201);
 }));
 
+// POST a line-level inline comment on a PR
+router.post('/:id/line-comments', auth, asyncHandler(async (req, res) => {
+  const { filePath, lineNumber, body } = req.body;
+  if (!filePath || !lineNumber || !body) {
+    throw new AppError('filePath, lineNumber, and body are required', 400);
+  }
+
+  const pr = await PullRequest.findById(req.params.id);
+  if (!pr) throw new AppError('Pull Request not found', 404);
+
+  const commentObj = {
+    filePath,
+    lineNumber,
+    author: req.user.id,
+    body,
+    created_at: new Date()
+  };
+
+  pr.comments = pr.comments || [];
+  pr.comments.push(commentObj);
+  await pr.save();
+
+  // Populate author info
+  const populatedPr = await PullRequest.findById(req.params.id)
+    .populate('comments.author', 'login avatar_url');
+
+  const savedComment = populatedPr.comments[populatedPr.comments.length - 1];
+
+  successResponse(res, savedComment, 'Line comment posted successfully', 201);
+}));
+
+// GET line-level inline comments for a PR
+router.get('/:id/line-comments', optionalAuth, asyncHandler(async (req, res) => {
+  const pr = await PullRequest.findById(req.params.id)
+    .populate('comments.author', 'login avatar_url');
+  if (!pr) throw new AppError('Pull Request not found', 404);
+  successResponse(res, pr.comments || []);
+}));
+
 export default router;

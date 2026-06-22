@@ -38,6 +38,7 @@ export const createRepoValidator = Joi.object({
   visibility: Joi.string().valid('public', 'private'),
   addReadme: Joi.boolean(),
   fileTree: Joi.array().items(Joi.any()),
+  license: Joi.string().max(100).allow(''),
 });
 
 export const updateRepoValidator = Joi.object({
@@ -46,6 +47,7 @@ export const updateRepoValidator = Joi.object({
   language: Joi.string().max(50),
   visibility: Joi.string().valid('public', 'private'),
   fileTree: Joi.array().items(Joi.any()),
+  license: Joi.string().max(100).allow(''),
 }).min(1);
 
 export const searchValidator = Joi.object({

@@ -8,6 +8,7 @@ const issueSchema = new mongoose.Schema({
   description: { type: String, default: '' },
   state: { type: String, enum: ['open', 'closed'], default: 'open' },
   labels: [String],
+  milestone: { type: String, default: "" },
   comments_count: { type: Number, default: 0 },
   is_deleted: { type: Boolean, default: false },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });

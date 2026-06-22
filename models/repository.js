@@ -16,6 +16,7 @@ const repositorySchema = new mongoose.Schema({
   branches: { type: [String], default: ['main'] },
   tags: { type: [String], default: [] },
   is_deleted: { type: Boolean, default: false, index: true },
+  license: { type: String, default: "MIT License" },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 repositorySchema.index({ owner: 1, is_deleted: 1 });

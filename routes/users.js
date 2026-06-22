@@ -151,4 +151,11 @@ router.get('/search', asyncHandler(async (req, res) => {
   successResponse(res, { users, total });
 }));
 
+router.get('/activity/feed', auth, asyncHandler(async (req, res) => {
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 20;
+  const result = await userService.getActivityFeed(req.user.id, { page, limit });
+  successResponse(res, result, 'Activity feed retrieved');
+}));
+
 export default router;
