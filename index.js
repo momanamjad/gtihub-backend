@@ -109,7 +109,7 @@ const generalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 auth requests per windowMs
+  max: 10000, // limit each IP to 10000 auth requests per windowMs to prevent rate limiting in development
   message: 'Too many login attempts, please try again later.',
   skipSuccessfulRequests: true,
 });
