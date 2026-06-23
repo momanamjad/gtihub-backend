@@ -125,19 +125,57 @@ app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Database Connection
-let dbUri = process.env.MONGODB_URI;
-if (dbUri) {
-  dbUri = dbUri.trim().replace(/^["']|["']$/g, '');
-}
+// Disable query buffering so that we don't hang for 10s if the connection fails or isn't ready
+mongoose.set('bufferCommands', false);
 
-if (!dbUri) {
-  console.error('❌ Connection Error: MONGODB_URI environment variable is not defined!');
-} else {
-  mongoose.connect(dbUri)
-    .then(() => console.log('✅ Connected to MongoDB'))
-    .catch((err) => console.error('❌ Connection Error:', err.message));
-}
+// Database Connection Middleware for Serverless/Vercel
+const connectDB = async (req, res, next) => {
+  // If already connected, proceed
+  if (mongoose.connection.readyState === 1) {
+    return next();
+  }
+
+  let dbUri = process.env.MONGODB_URI;
+  if (dbUri) {
+    dbUri = dbUri.trim().replace(/^["']|["']$/g, '');
+  }
+
+  if (!dbUri) {
+    return res.status(500).json({
+      success: false,
+      message: 'Database connection failed: MONGODB_URI environment variable is not defined.'
+    });
+  }
+
+  try {
+    // If connecting, wait for it
+    if (mongoose.connection.readyState === 2) {
+      await new Promise((resolve) => {
+        const interval = setInterval(() => {
+          if (mongoose.connection.readyState === 1) {
+            clearInterval(interval);
+            resolve();
+          }
+        }, 50);
+      });
+      return next();
+    }
+
+    // Otherwise, connect
+    console.log('🔄 Connecting to MongoDB...');
+    await mongoose.connect(dbUri);
+    console.log('✅ Connected to MongoDB');
+    next();
+  } catch (err) {
+    console.error('❌ Database Connection Error:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Database connection failed: ' + err.message
+    });
+  }
+};
+
+app.use(connectDB);
 
 // Swagger Documentation
 app.use('/api/docs', swaggerUi.serve);
