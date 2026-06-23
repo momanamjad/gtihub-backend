@@ -20,42 +20,44 @@ export const createRepository = async (userId, repoData) => {
   const username = user?.login || 'momanamjad';
   const commitHash = Math.random().toString(16).substring(2, 9);
 
-  // Create default file nodes in FileNode collection
-  const defaultTree = [
-    { 
-      repository: repo._id, 
-      branch: 'main',
-      type: 'dir', 
-      name: 'src', 
-      path: 'src', 
-      parentPath: '', 
-      lastCommitMessage: 'Initial commit', 
-      lastCommitAuthor: username, 
-      lastCommitDate: new Date() 
-    },
-    { 
-      repository: repo._id, 
-      branch: 'main',
-      type: 'file', 
-      name: 'README.md', 
-      path: 'README.md', 
-      content: `# ${repoData.name}\n`, 
-      parentPath: '', 
-      lastCommitMessage: 'Initial commit', 
-      lastCommitAuthor: username, 
-      lastCommitDate: new Date() 
-    }
-  ];
-  await FileNode.insertMany(defaultTree);
+  // Only create default file nodes if addReadme is requested
+  if (repoData.addReadme) {
+    const defaultTree = [
+      { 
+        repository: repo._id, 
+        branch: 'main',
+        type: 'dir', 
+        name: 'src', 
+        path: 'src', 
+        parentPath: '', 
+        lastCommitMessage: 'Initial commit', 
+        lastCommitAuthor: username, 
+        lastCommitDate: new Date() 
+      },
+      { 
+        repository: repo._id, 
+        branch: 'main',
+        type: 'file', 
+        name: 'README.md', 
+        path: 'README.md', 
+        content: `# ${repoData.name}\n`, 
+        parentPath: '', 
+        lastCommitMessage: 'Initial commit', 
+        lastCommitAuthor: username, 
+        lastCommitDate: new Date() 
+      }
+    ];
+    await FileNode.insertMany(defaultTree);
+    
+    // Record contribution only if files are created (initial commit)
+    await recordContribution(userId, 'repo_created', repo._id, {
+      commitMessage: 'Initial commit',
+      commitAuthor: username,
+      commitHash
+    });
+  }
 
   await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
-  
-  // Record contribution
-  await recordContribution(userId, 'repo_created', repo._id, {
-    commitMessage: 'Initial commit',
-    commitAuthor: username,
-    commitHash
-  });
   
   return repo;
 };
