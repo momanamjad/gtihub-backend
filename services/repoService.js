@@ -9,6 +9,63 @@ import Contribution from '../models/contribution.js';
 import { AppError } from '../utils/errorHandler.js';
 import { recordContribution } from './userService.js';
 
+const GITIGNORE_TEMPLATES = {
+  node: `node_modules/
+npm-debug.log
+.env
+dist/
+target/
+.DS_Store
+`,
+  python: `__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+`,
+  java: `*.class
+*.log
+*.jar
+*.war
+target/
+.idea/
+.gradle/
+build/
+`,
+  react: `node_modules/
+build/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+`,
+  vue: `node_modules/
+dist/
+.env.local
+`,
+  angular: `node_modules/
+dist/
+tmp/
+`,
+  go: `bin/
+pkg/
+src/
+`,
+  swift: `.build/
+Packages/
+.DS_Store
+`,
+  kotlin: `*.class
+target/
+build/
+`,
+};
+
 export const createRepository = async (userId, repoData) => {
   const repo = new Repository({ 
     ...repoData, 
@@ -20,10 +77,12 @@ export const createRepository = async (userId, repoData) => {
   const username = user?.login || 'momanamjad';
   const commitHash = Math.random().toString(16).substring(2, 9);
 
-  // Only create default file nodes if addReadme is requested
-  if (repoData.addReadme) {
-    const defaultTree = [
-      { 
+  const filesToInsert = [];
+  const hasInitialFiles = repoData.addReadme || repoData.gitignoreTemplate || repoData.license;
+
+  if (hasInitialFiles) {
+    if (repoData.addReadme) {
+      filesToInsert.push({ 
         repository: repo._id, 
         branch: 'main',
         type: 'dir', 
@@ -33,21 +92,101 @@ export const createRepository = async (userId, repoData) => {
         lastCommitMessage: 'Initial commit', 
         lastCommitAuthor: username, 
         lastCommitDate: new Date() 
-      },
-      { 
+      });
+      filesToInsert.push({ 
         repository: repo._id, 
         branch: 'main',
         type: 'file', 
         name: 'README.md', 
         path: 'README.md', 
-        content: `# ${repoData.name}\n`, 
+        content: `# ${repoData.name}\n${repoData.description || ''}\n`, 
         parentPath: '', 
         lastCommitMessage: 'Initial commit', 
         lastCommitAuthor: username, 
         lastCommitDate: new Date() 
+      });
+    }
+
+    if (repoData.gitignoreTemplate) {
+      const templateName = repoData.gitignoreTemplate.toLowerCase();
+      const content = GITIGNORE_TEMPLATES[templateName] || `# .gitignore for ${templateName}\nnode_modules/\n`;
+      filesToInsert.push({ 
+        repository: repo._id, 
+        branch: 'main',
+        type: 'file', 
+        name: '.gitignore', 
+        path: '.gitignore', 
+        content: content, 
+        parentPath: '', 
+        lastCommitMessage: 'Initial commit', 
+        lastCommitAuthor: username, 
+        lastCommitDate: new Date() 
+      });
+    }
+
+    if (repoData.license) {
+      const licenseName = repoData.license.toLowerCase();
+      const year = new Date().getFullYear();
+      let content = "";
+      if (licenseName.includes("mit")) {
+        content = `MIT License
+
+Copyright (c) ${year} ${username}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`;
+      } else if (licenseName.includes("apache")) {
+        content = `Apache License 2.0
+
+Copyright (c) ${year} ${username}
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.`;
+      } else {
+        content = `${repoData.license}
+
+Copyright (c) ${year} ${username}
+All rights reserved.`;
       }
-    ];
-    await FileNode.insertMany(defaultTree);
+      filesToInsert.push({ 
+        repository: repo._id, 
+        branch: 'main',
+        type: 'file', 
+        name: 'LICENSE', 
+        path: 'LICENSE', 
+        content: content, 
+        parentPath: '', 
+        lastCommitMessage: 'Initial commit', 
+        lastCommitAuthor: username, 
+        lastCommitDate: new Date() 
+      });
+    }
+
+    await FileNode.insertMany(filesToInsert);
     
     // Record contribution only if files are created (initial commit)
     await recordContribution(userId, 'repo_created', repo._id, {

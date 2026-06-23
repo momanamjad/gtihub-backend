@@ -39,6 +39,7 @@ export const createRepoValidator = Joi.object({
   addReadme: Joi.boolean(),
   fileTree: Joi.array().items(Joi.any()),
   license: Joi.string().max(100).allow(''),
+  gitignoreTemplate: Joi.string().max(100).allow(''),
 });
 
 export const updateRepoValidator = Joi.object({
