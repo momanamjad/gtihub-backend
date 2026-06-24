@@ -23,6 +23,7 @@ import discussionRoutes from './routes/discussions.js';
 import mcpRoutes from './routes/mcp.js';
 import copilotRoutes from './routes/copilot.js';
 import uploadRoutes from './routes/upload.js';
+import wikiRoutes from './routes/wiki.js';
 
 // Import error handling
 import { errorHandler } from './utils/errorHandler.js';
@@ -212,6 +213,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/repos', repoRoutes);
 app.use('/api/repos/:repoId/pulls', pullRoutes);
 app.use('/api/repos/:repoId/discussions', discussionRoutes);
+app.use('/api/repos/:repoId/wiki', wikiRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/mcp', mcpRoutes);
 app.use('/api/copilot', copilotRoutes);

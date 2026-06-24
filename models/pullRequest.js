@@ -14,6 +14,12 @@ const pullRequestSchema = new mongoose.Schema({
     author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     body: { type: String, required: true },
     created_at: { type: Date, default: Date.now }
+  }],
+  reviews: [{
+    reviewer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    state: { type: String, enum: ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'], required: true },
+    body: { type: String, default: "" },
+    submitted_at: { type: Date, default: Date.now }
   }]
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
