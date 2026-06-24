@@ -420,7 +420,7 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
   
   // Clear reset token fields
   user.resetPasswordToken = null;
-  user.resetPasswordExpires = undefined;
+  user.resetPasswordExpires = null;
 
   await user.save();
 
