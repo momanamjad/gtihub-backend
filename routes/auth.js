@@ -348,8 +348,9 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
  */
 router.post('/forgot-password', asyncHandler(async (req, res) => {
   const { email } = req.body;
-  if (!email) {
-    throw new AppError('Email is required', 400);
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!email || !emailRegex.test(email)) {
+    return res.status(400).json({ message: 'Invalid email address' });
   }
 
   const user = await User.findOne({ email });
