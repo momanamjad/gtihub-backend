@@ -3,7 +3,7 @@ import Joi from 'joi';
 export const registerValidator = Joi.object({
   login: Joi.string().alphanum().min(3).max(30).required(),
   email: Joi.string().email().required(),
-  password: Joi.string().min(6).max(30).required(),
+  password: Joi.string().min(8).pattern(/(?=.*[A-Z])(?=.*[0-9])/).message('Password must be at least 8 characters long, contain at least one uppercase letter and one number').required(),
 });
 
 export const loginValidator = Joi.object({
@@ -13,7 +13,7 @@ export const loginValidator = Joi.object({
 
 export const changePasswordValidator = Joi.object({
   oldPassword: Joi.string().required(),
-  newPassword: Joi.string().min(6).max(30).required(),
+  newPassword: Joi.string().min(8).pattern(/(?=.*[A-Z])(?=.*[0-9])/).message('Password must be at least 8 characters long, contain at least one uppercase letter and one number').required(),
 });
 
 export const updateProfileValidator = Joi.object({

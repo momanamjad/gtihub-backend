@@ -399,8 +399,8 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
   }
 
   // Verify password requirements
-  if (password.length < 6) {
-    throw new AppError('Password must be at least 6 characters long', 400);
+  if (password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+    throw new AppError('Password must be at least 8 characters long and contain at least one uppercase letter and one number', 400);
   }
 
   const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
