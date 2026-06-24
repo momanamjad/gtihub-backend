@@ -1,4 +1,5 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { validateQuery } from '../utils/validate.js';
 import { paginationValidator } from '../utils/validators.js';
 import { successResponse, paginatedResponse } from '../utils/responseFormatter.js';
@@ -9,6 +10,19 @@ import PullRequest from '../models/pullRequest.js';
 import Repository from '../models/repository.js';
 
 const router = express.Router();
+
+const searchLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // Limit each IP to 30 search requests per 15 minutes
+  message: 'Too many search requests, please try again later.',
+  skip: (req) => {
+    return process.env.NODE_ENV === 'development';
+  }
+});
+
+function escapeRegex(string) {
+  return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
+}
 
 /**
  * @swagger
@@ -91,15 +105,17 @@ router.get('/:id/following', validateQuery(paginationValidator), asyncHandler(as
  */
 router.get('/notifications', auth, validateQuery(paginationValidator), asyncHandler(async (req, res) => {
   const { notifications, total, unread } = await userService.getNotifications(req.user.id, req.query);
+  const limit = parseInt(req.query.limit, 10) || 10;
+  const page = parseInt(req.query.page, 10) || 1;
   res.status(200).json({
     success: true,
     message: 'Notifications retrieved',
     data: notifications,
     pagination: {
-      page: req.query.page,
-      limit: req.query.limit,
+      page,
+      limit,
       total,
-      pages: Math.ceil(total / req.query.limit),
+      pages: Math.ceil(total / limit),
     },
     unread,
   });
@@ -145,9 +161,13 @@ router.put('/notifications/:notificationId', auth, asyncHandler(async (req, res)
   successResponse(res, notification, 'Notification marked as read');
 }));
 
-router.get('/search', asyncHandler(async (req, res) => {
+router.get('/search', searchLimiter, asyncHandler(async (req, res) => {
   const { q, page = 1, limit = 10 } = req.query;
-  const { users, total } = await userService.searchUsers({ q, page, limit });
+  if (!q || q.length > 100) {
+    return res.status(400).json({ message: 'Search query is required and must be under 100 characters' });
+  }
+  const escapedQ = escapeRegex(q);
+  const { users, total } = await userService.searchUsers({ q: escapedQ, page: parseInt(page, 10) || 1, limit: parseInt(limit, 10) || 10 });
   successResponse(res, { users, total });
 }));
 

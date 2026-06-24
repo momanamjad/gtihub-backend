@@ -278,6 +278,9 @@ router.get('/search/query', asyncHandler(async (req, res) => {
  */
 router.post('/:id/issues', auth, asyncHandler(async (req, res) => {
   const { title, description, labels } = req.body;
+  if (!title?.trim()) {
+    return res.status(400).json({ message: 'Issue title is required' });
+  }
   const issue = await repoService.createIssue(req.params.id, req.user.id, { title, description, labels });
   successResponse(res, issue, 'Issue created successfully', 201);
 }));
@@ -489,7 +492,8 @@ router.get('/:id/actions/runs', optionalAuth, asyncHandler(async (req, res) => {
 router.post('/:id/actions/runs', auth, asyncHandler(async (req, res) => {
   const { branch } = req.body;
   const mockLogs = [
-    "🚀 Starting build environment on runner host UBUNTU-LATEST...",
+    "[DEMO/MOCK WORKFLOW RUN LOGS]",
+    "🚀 Starting build environment on runner host UBUNTU-LATEST (MOCK)...",
     "🔧 Setup Node.js environment version v20.11.0...",
     "📦 Loading dependency caching layers from cache key: node-modules-v1...",
     "📥 Executing npm clean-install (npm ci)...",
@@ -506,8 +510,8 @@ router.post('/:id/actions/runs', auth, asyncHandler(async (req, res) => {
     "🎉 Frontend bundle created successfully!",
     "🚀 Launching deploy deployment task to edge network host...",
     "📦 Syncing build assets with remote storage...",
-    "✅ Deployment live: https://github-kappa-two.vercel.app",
-    "🎉 Pipeline workflow run finished successfully with exit status: 0."
+    "✅ Deployment live: https://demo-deployment-url.local",
+    "🎉 Mock pipeline workflow run finished successfully with exit status: 0."
   ];
 
   const run = new WorkflowRun({
