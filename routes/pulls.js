@@ -49,6 +49,7 @@ router.post('/', auth, asyncHandler(async (req, res) => {
     targetBranch: targetBranch || 'main'
   });
 
+  pr.number = await PullRequest.countDocuments({ repository: repoId }) + 1;
   await pr.save();
   
   // Record contribution
@@ -209,6 +210,10 @@ router.post('/:id/reviews', auth, asyncHandler(async (req, res) => {
   const pr = await PullRequest.findById(req.params.id);
   if (!pr) throw new AppError('Pull Request not found', 404);
 
+  if (pr.repository.toString() !== req.params.repoId) {
+    throw new AppError('Pull Request not found', 404);
+  }
+
   // Find if user already reviewed
   const existingIndex = pr.reviews.findIndex(r => r.reviewer.toString() === req.user.id.toString());
   const reviewData = {
@@ -237,6 +242,11 @@ router.get('/:id/reviews', optionalAuth, asyncHandler(async (req, res) => {
   const pr = await PullRequest.findById(req.params.id)
     .populate('reviews.reviewer', 'login avatar_url');
   if (!pr) throw new AppError('Pull Request not found', 404);
+
+  if (pr.repository.toString() !== req.params.repoId) {
+    throw new AppError('Pull Request not found', 404);
+  }
+
   successResponse(res, pr.reviews || []);
 }));
 

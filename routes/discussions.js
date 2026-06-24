@@ -31,6 +31,11 @@ router.post('/', auth, asyncHandler(async (req, res) => {
   const { repoId } = req.params;
   const { title, body, category } = req.body;
 
+  if (!title?.trim()) return res.status(400).json({ message: 'Title is required' });
+  if (!body?.trim()) return res.status(400).json({ message: 'Body is required' });
+  if (title.length > 256) return res.status(400).json({ message: 'Title too long' });
+  if (body.length > 65536) return res.status(400).json({ message: 'Body too long' });
+
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
 
@@ -54,21 +59,19 @@ router.post('/:id/upvote', auth, asyncHandler(async (req, res) => {
   const discussion = await Discussion.findById(id);
   if (!discussion) throw new AppError('Discussion not found', 404);
 
-  const index = discussion.upvotes.indexOf(userId);
-  if (index === -1) {
-    discussion.upvotes.push(userId);
-  } else {
-    discussion.upvotes.splice(index, 1);
-  }
-
-  await discussion.save();
-  successResponse(res, discussion, index === -1 ? 'Upvoted' : 'Upvote removed');
+  const hasVoted = discussion.upvotes.includes(userId);
+  const op = hasVoted ? { $pull: { upvotes: userId } } : { $addToSet: { upvotes: userId } };
+  
+  const updatedDiscussion = await Discussion.findByIdAndUpdate(id, op, { new: true });
+  successResponse(res, updatedDiscussion, hasVoted ? 'Upvote removed' : 'Upvoted');
 }));
 
 // Add a reply
 router.post('/:id/replies', auth, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { body } = req.body;
+
+  if (!body?.trim()) return res.status(400).json({ message: 'Reply body is required' });
 
   const discussion = await Discussion.findById(id);
   if (!discussion) throw new AppError('Discussion not found', 404);
@@ -93,14 +96,14 @@ router.put('/:id/replies/:replyId/answer', auth, asyncHandler(async (req, res) =
 
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
-  
-  // Only repository owner can mark answers
-  if (repo.owner.toString() !== req.user.id) {
-    throw new AppError('Only the repository owner can mark an answer', 403);
-  }
 
   const discussion = await Discussion.findById(id);
   if (!discussion) throw new AppError('Discussion not found', 404);
+  
+  const discussionCreator = discussion.creator || discussion.author;
+  if (repo.owner.toString() !== req.user.id && discussionCreator?.toString() !== req.user.id) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
 
   let replyFound = false;
   discussion.replies = discussion.replies.map(r => {

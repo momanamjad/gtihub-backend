@@ -11,6 +11,9 @@ const router = express.Router();
 // Context-aware chat endpoint
 router.post('/chat', optionalAuth, asyncHandler(async (req, res) => {
   const { message, history = [], repoId } = req.body;
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ message: 'message is required and must be a string' });
+  }
 
   let contextInfo = "";
 
@@ -24,7 +27,7 @@ router.post('/chat', optionalAuth, asyncHandler(async (req, res) => {
       // Get count of issues
       const issueCount = await Issue.countDocuments({ repository: repoId, is_deleted: false });
       // Get count of pull requests
-      const prCount = await PullRequest.countDocuments({ repository: repoId });
+      const prCount = await PullRequest.countDocuments({ repository: repoId, status: 'open' });
 
       contextInfo += `Open Issues: ${issueCount}\n`;
       contextInfo += `Open Pull Requests: ${prCount}\n`;

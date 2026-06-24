@@ -185,14 +185,16 @@ export const getNotifications = async (userId, { page = 1, limit = 10 }) => {
   return { notifications, total, unread };
 };
 
-export const markNotificationAsRead = async (notificationId) => {
-  const notification = await Notification.findByIdAndUpdate(
-    notificationId,
-    { isRead: true },
-    { new: true }
-  );
-
+export const markNotificationAsRead = async (notificationId, userId) => {
+  const notification = await Notification.findById(notificationId);
   if (!notification) throw new AppError('Notification not found', 404);
+
+  if (notification.user.toString() !== userId.toString()) {
+    throw new AppError('Forbidden', 403);
+  }
+
+  notification.isRead = true;
+  await notification.save();
   return notification;
 };
 

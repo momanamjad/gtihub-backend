@@ -24,6 +24,7 @@ import mcpRoutes from './routes/mcp.js';
 import copilotRoutes from './routes/copilot.js';
 import uploadRoutes from './routes/upload.js';
 import wikiRoutes from './routes/wiki.js';
+import projectRoutes from './routes/projects.js';
 
 // Import error handling
 import { errorHandler } from './utils/errorHandler.js';
@@ -41,7 +42,7 @@ const allowedOrigins = process.env.CORS_ORIGIN
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
+      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -81,7 +82,7 @@ app.use(cors({
   origin: (origin, callback) => {
     // allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1 && !origin.endsWith('.vercel.app')) {
+    if (allowedOrigins.indexOf(origin) === -1) {
       const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
       return callback(new Error(msg), false);
     }
@@ -94,25 +95,34 @@ app.options(/.*/, cors());
 
 // Security Middleware
 app.use(helmet({
-  crossOriginResourcePolicy: false,
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      scriptSrc: ["'self'", "'unsafe-inline'"]
+    }
+  },
+  crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
 // Rate Limiting
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10000, // limit each IP to 10000 requests per windowMs to prevent rate limiting in development
+  max: 100,
   message: 'Too many requests from this IP, please try again later.',
   skip: (req) => {
-    return !!req.cookies?.accessToken;
+    return process.env.NODE_ENV === 'development';
   }
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10000, // limit each IP to 10000 auth requests per windowMs to prevent rate limiting in development
+  max: 20,
   message: 'Too many login attempts, please try again later.',
   skipSuccessfulRequests: true,
+  skip: (req) => {
+    return process.env.NODE_ENV === 'development';
+  }
 });
 
 app.use('/api/', generalLimiter);
@@ -149,15 +159,20 @@ const connectDB = async (req, res, next) => {
   }
 
   try {
-    // If connecting, wait for it
     if (mongoose.connection.readyState === 2) {
-      await new Promise((resolve) => {
+      await new Promise((resolve, reject) => {
+        let retries = 0;
+        const maxRetries = 20; // 10 seconds at 500ms intervals
         const interval = setInterval(() => {
+          retries++;
           if (mongoose.connection.readyState === 1) {
             clearInterval(interval);
             resolve();
+          } else if (retries >= maxRetries) {
+            clearInterval(interval);
+            reject(new Error('MongoDB connection timeout'));
           }
-        }, 50);
+        }, 500);
       });
       return next();
     }
@@ -218,11 +233,21 @@ app.use('/api/users', userRoutes);
 app.use('/api/mcp', mcpRoutes);
 app.use('/api/copilot', copilotRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/projects', projectRoutes);
 app.get('/uploads/:filename', (req, res) => {
-  const filename = req.params.filename;
-  const filePath = process.env.VERCEL 
-    ? path.join('/tmp', filename)
-    : path.resolve('public/uploads', filename);
+  const safeFilename = path.basename(req.params.filename);
+  
+  const uploadDir = process.env.VERCEL 
+    ? '/tmp'
+    : path.resolve('public/uploads');
+    
+  const filePath = path.resolve(uploadDir, safeFilename);
+  
+  // Verify that the resolved path is inside the upload directory
+  if (!filePath.startsWith(path.resolve(uploadDir))) {
+    return res.status(400).json({ success: false, message: 'Invalid file path' });
+  }
+
   res.sendFile(filePath, (err) => {
     if (err) {
       res.status(404).json({ success: false, message: 'Image not found' });

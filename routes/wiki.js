@@ -59,6 +59,8 @@ router.post('/', auth, asyncHandler(async (req, res) => {
   const { title, content } = req.body;
 
   if (!title) throw new AppError('Title is required', 400);
+  if (!content?.trim()) return res.status(400).json({ message: 'Content is required' });
+  if (content.length > 500000) return res.status(400).json({ message: 'Content too long' });
 
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
@@ -79,6 +81,8 @@ router.post('/', auth, asyncHandler(async (req, res) => {
     page.content = content || "";
     page.author = req.user.id;
     await page.save();
+    await page.populate('author', 'login avatar_url');
+    successResponse(res, page, 'Wiki page saved successfully');
   } else {
     // Create new page
     page = new WikiPage({
@@ -89,10 +93,9 @@ router.post('/', auth, asyncHandler(async (req, res) => {
       author: req.user.id
     });
     await page.save();
+    await page.populate('author', 'login avatar_url');
+    successResponse(res, page, 'Wiki page created successfully', 201);
   }
-
-  await page.populate('author', 'login avatar_url');
-  successResponse(res, page, 'Wiki page saved successfully');
 }));
 
 // DELETE a wiki page

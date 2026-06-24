@@ -5,6 +5,8 @@ import { successResponse, paginatedResponse } from '../utils/responseFormatter.j
 import { asyncHandler } from '../utils/errorHandler.js';
 import { auth } from '../middleware/auth.js';
 import * as userService from '../services/userService.js';
+import PullRequest from '../models/pullRequest.js';
+import Repository from '../models/repository.js';
 
 const router = express.Router();
 
@@ -116,8 +118,6 @@ router.get('/notifications', auth, validateQuery(paginationValidator), asyncHand
  *         required: true
  *         schema: { type: string }
  */
-import PullRequest from '../models/pullRequest.js';
-import Repository from '../models/repository.js';
 
 router.get('/pulls', auth, asyncHandler(async (req, res) => {
   const userRepos = await Repository.find({ owner: req.user.id, is_deleted: false });
@@ -141,7 +141,7 @@ router.get('/pulls', auth, asyncHandler(async (req, res) => {
 }));
 
 router.put('/notifications/:notificationId', auth, asyncHandler(async (req, res) => {
-  const notification = await userService.markNotificationAsRead(req.params.notificationId);
+  const notification = await userService.markNotificationAsRead(req.params.notificationId, req.user.id);
   successResponse(res, notification, 'Notification marked as read');
 }));
 

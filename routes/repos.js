@@ -12,14 +12,21 @@ import ProjectCard from '../models/project.js';
 import WorkflowRun from '../models/workflowRun.js';
 import Secret from '../models/secret.js';
 import FileNode from '../models/fileNode.js';
+import Issue from '../models/issue.js';
 import { recordContribution } from '../services/userService.js';
 
-const ENCRYPTION_KEY = process.env.SECRET_ENCRYPTION_KEY || 'a_very_secure_and_long_32_byte_key_fallback';
+if (!process.env.SECRET_ENCRYPTION_KEY) {
+  throw new Error('SECRET_ENCRYPTION_KEY must be set');
+}
+if (Buffer.byteLength(process.env.SECRET_ENCRYPTION_KEY) !== 32) {
+  throw new Error('SECRET_ENCRYPTION_KEY must be exactly 32 bytes');
+}
+const ENCRYPTION_KEY = process.env.SECRET_ENCRYPTION_KEY;
 const IV_LENGTH = 16;
 
 function encrypt(text) {
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY.padEnd(32).substring(0, 32)), iv);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
   let encrypted = cipher.update(text);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString('hex') + ':' + encrypted.toString('hex');
@@ -366,6 +373,18 @@ router.post('/:id/tags', auth, asyncHandler(async (req, res) => {
 
 // GET comments for an issue
 router.get('/:id/issues/:issueId/comments', optionalAuth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
+  if (repo.visibility === 'private' && (!req.user || repo.owner.toString() !== req.user.id)) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
+
+  const issue = await Issue.findById(req.params.issueId);
+  if (!issue || issue.is_deleted || issue.repository.toString() !== req.params.id) {
+    throw new AppError('Issue not found', 404);
+  }
+
   const comments = await Comment.find({ issue: req.params.issueId })
     .populate('author', 'login avatar_url')
     .sort('createdAt');
@@ -374,6 +393,18 @@ router.get('/:id/issues/:issueId/comments', optionalAuth, asyncHandler(async (re
 
 // POST a new comment on an issue
 router.post('/:id/issues/:issueId/comments', auth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
+  if (repo.visibility === 'private' && repo.owner.toString() !== req.user.id) {
+    throw new AppError('Unauthorized access to private repository', 403);
+  }
+
+  const issue = await Issue.findById(req.params.issueId);
+  if (!issue || issue.is_deleted || issue.repository.toString() !== req.params.id) {
+    throw new AppError('Issue not found', 404);
+  }
+
   const { body } = req.body;
   if (!body) throw new AppError('Comment body is required', 400);
 
@@ -414,9 +445,16 @@ router.post('/:id/projects', auth, asyncHandler(async (req, res) => {
 }));
 
 router.patch('/:id/projects/cards/:cardId', auth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
   const { title, description, column } = req.body;
   const card = await ProjectCard.findById(req.params.cardId);
   if (!card) throw new AppError('Card not found', 404);
+
+  if (card.creator.toString() !== req.user.id && repo.owner.toString() !== req.user.id) {
+    throw new AppError('Forbidden', 403);
+  }
 
   if (title !== undefined) card.title = title;
   if (description !== undefined) card.description = description;
@@ -427,8 +465,15 @@ router.patch('/:id/projects/cards/:cardId', auth, asyncHandler(async (req, res) 
 }));
 
 router.delete('/:id/projects/cards/:cardId', auth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+
   const card = await ProjectCard.findById(req.params.cardId);
   if (!card) throw new AppError('Card not found', 404);
+
+  if (card.creator.toString() !== req.user.id && repo.owner.toString() !== req.user.id) {
+    throw new AppError('Forbidden', 403);
+  }
 
   await ProjectCard.deleteOne({ _id: req.params.cardId });
   successResponse(res, null, 'Card deleted successfully');
@@ -539,6 +584,7 @@ router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
 
   const { files } = req.body;
   if (!Array.isArray(files)) throw new AppError('Files list must be an array', 400);
+  if (files.length > 10000) return res.status(400).json({ message: 'Too many files' });
 
   // 1. Delete all current file nodes
   await FileNode.deleteMany({ repository: req.params.id });

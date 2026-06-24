@@ -27,7 +27,7 @@ const setTokenCookies = (res, accessToken, refreshToken) => {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    maxAge: 15 * 60 * 1000 // 15 minutes
   });
 
   res.cookie('refreshToken', refreshToken, {
@@ -204,8 +204,19 @@ router.post('/refresh', asyncHandler(async (req, res) => {
   }
   
   const userId = await authService.verifyRefreshToken(refreshToken);
+  
+  // Verify the incoming refresh token matches the one stored in the DB
+  const user = await User.findById(userId);
+  if (!user || user.refreshToken !== refreshToken) {
+    throw new AppError('Invalid refresh token, authorization denied', 401);
+  }
+
   const { accessToken: newAccessToken, refreshToken: newRefreshToken } = authService.generateTokens(userId);
   
+  // Save new refresh token to DB (rotating/invalidating the old one)
+  user.refreshToken = newRefreshToken;
+  await user.save();
+
   setTokenCookies(res, newAccessToken, newRefreshToken);
   successResponse(res, { accessToken: newAccessToken, refreshToken: newRefreshToken }, 'Token refreshed successfully');
 }));
@@ -218,6 +229,15 @@ router.post('/refresh', asyncHandler(async (req, res) => {
  *     tags: [Auth]
  */
 router.post('/logout', asyncHandler(async (req, res) => {
+  const refreshToken = req.cookies?.refreshToken;
+  if (refreshToken) {
+    try {
+      const userId = await authService.verifyRefreshToken(refreshToken);
+      await User.findByIdAndUpdate(userId, { refreshToken: "" });
+    } catch (err) {
+      // Ignore token verification errors during logout
+    }
+  }
   clearTokenCookies(res);
   successResponse(res, null, 'Logged out successfully');
 }));
@@ -246,7 +266,7 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
-    console.warn('WARNING: GOOGLE_CLIENT_ID is not configured in environment variables.');
+    return res.status(503).json({ message: "Google Sign-In is not configured" });
   }
 
   let payload;
@@ -282,7 +302,7 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
     }
 
     // Generate a secure random password for DB requirement
-    const randomPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).toUpperCase().slice(-10);
+    const randomPassword = crypto.randomBytes(32).toString('hex');
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(randomPassword, salt);
 
@@ -297,6 +317,9 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
   }
 
   const { accessToken, refreshToken } = authService.generateTokens(user.id);
+  user.refreshToken = refreshToken;
+  await user.save();
+  
   const userObj = user.toObject();
   delete userObj.password;
 
@@ -340,9 +363,8 @@ router.post('/forgot-password', asyncHandler(async (req, res) => {
   await user.save();
 
   // Create reset link
-  const origin = req.headers.referer || req.headers.origin || 'http://localhost:5173';
-  const parsedOrigin = new URL(origin);
-  const resetUrl = `${parsedOrigin.origin}/reset-password?token=${resetToken}`;
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
 
   await sendResetEmail(user.email, resetUrl);
 
@@ -393,7 +415,7 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
   user.password = await bcrypt.hash(password, salt);
   
   // Clear reset token fields
-  user.resetPasswordToken = "";
+  user.resetPasswordToken = null;
   user.resetPasswordExpires = undefined;
 
   await user.save();
