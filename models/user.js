@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema({
   location: { type: String, default: "" },
   blog: { type: String, default: "" },
   pronouns: { type: String, default: "" },
+  socialLinks: { type: [String], default: [] },
   status: {
     emoji: { type: String, default: "" },
     text: { type: String, default: "" },

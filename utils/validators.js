@@ -24,6 +24,7 @@ export const updateProfileValidator = Joi.object({
   location: Joi.string().max(100).allow(''),
   blog: Joi.string().allow(''),
   pronouns: Joi.string().max(20).allow(''),
+  socialLinks: Joi.array().items(Joi.string().allow('')).max(4),
   status: Joi.object({
     emoji: Joi.string().allow(''),
     text: Joi.string().allow(''),

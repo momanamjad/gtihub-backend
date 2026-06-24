@@ -94,7 +94,7 @@ export const updateProfile = async (userId, updates) => {
   const user = await User.findById(userId);
   if (!user) throw new AppError('User not found', 404);
 
-  const allowedFields = ['name', 'bio', 'avatar_url', 'company', 'location', 'blog', 'pronouns', 'status'];
+  const allowedFields = ['name', 'bio', 'avatar_url', 'company', 'location', 'blog', 'pronouns', 'status', 'socialLinks'];
   allowedFields.forEach(field => {
     if (updates[field] !== undefined) {
       user[field] = updates[field];
