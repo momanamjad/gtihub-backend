@@ -295,10 +295,13 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
     if (!baseLogin) baseLogin = 'user';
     
     let login = baseLogin;
-    let counter = 1;
+    let attempts = 0;
     while (await User.findOne({ login })) {
-      login = `${baseLogin}${counter}`;
-      counter++;
+      if (++attempts > 10) {
+        login = `user_${crypto.randomBytes(8).toString('hex')}`;
+      } else {
+        login = `${baseLogin}${Math.floor(Math.random() * 9999)}`;
+      }
     }
 
     // Generate a secure random password for DB requirement
