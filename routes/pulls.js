@@ -96,6 +96,13 @@ router.post('/:id/merge', auth, asyncHandler(async (req, res) => {
   if (!pr) throw new AppError('Pull Request not found', 404);
   if (pr.status !== 'open') throw new AppError('Pull Request is already ' + pr.status, 400);
 
+  // Merge block guard: check if any review has CHANGES_REQUESTED
+  const activeReviews = pr.reviews || [];
+  const hasChangesRequested = activeReviews.some(r => r.state === 'CHANGES_REQUESTED');
+  if (hasChangesRequested) {
+    throw new AppError('Cannot merge: Changes are requested by a reviewer. Please resolve comments first.', 400);
+  }
+
   pr.status = 'merged';
   await pr.save();
 
@@ -190,6 +197,47 @@ router.get('/:id/line-comments', optionalAuth, asyncHandler(async (req, res) => 
     .populate('comments.author', 'login avatar_url');
   if (!pr) throw new AppError('Pull Request not found', 404);
   successResponse(res, pr.comments || []);
+}));
+
+// POST submit or update review state on a PR
+router.post('/:id/reviews', auth, asyncHandler(async (req, res) => {
+  const { state, body } = req.body;
+  if (!state || !['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'].includes(state)) {
+    throw new AppError('Valid review state is required (APPROVED, CHANGES_REQUESTED, COMMENTED)', 400);
+  }
+  
+  const pr = await PullRequest.findById(req.params.id);
+  if (!pr) throw new AppError('Pull Request not found', 404);
+
+  // Find if user already reviewed
+  const existingIndex = pr.reviews.findIndex(r => r.reviewer.toString() === req.user.id.toString());
+  const reviewData = {
+    reviewer: req.user.id,
+    state,
+    body: body || "",
+    submitted_at: new Date()
+  };
+
+  if (existingIndex > -1) {
+    pr.reviews[existingIndex] = reviewData;
+  } else {
+    pr.reviews.push(reviewData);
+  }
+
+  await pr.save();
+  
+  const populated = await PullRequest.findById(req.params.id)
+    .populate('reviews.reviewer', 'login avatar_url');
+
+  successResponse(res, populated.reviews, 'Review submitted successfully');
+}));
+
+// GET reviews for a PR
+router.get('/:id/reviews', optionalAuth, asyncHandler(async (req, res) => {
+  const pr = await PullRequest.findById(req.params.id)
+    .populate('reviews.reviewer', 'login avatar_url');
+  if (!pr) throw new AppError('Pull Request not found', 404);
+  successResponse(res, pr.reviews || []);
 }));
 
 export default router;
