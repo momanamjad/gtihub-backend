@@ -1,33 +1,13 @@
 import express from "express";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 import { auth } from "../middleware/auth.js";
 import { AppError } from "../utils/errorHandler.js";
 
 const router = express.Router();
 
-// Ensure upload directory exists
-const uploadDir = process.env.VERCEL ? "/tmp" : "./public/uploads";
-if (!process.env.VERCEL && !fs.existsSync(uploadDir)) {
-  try {
-    fs.mkdirSync(uploadDir, { recursive: true });
-  } catch (err) {
-    console.error("Failed to create upload directory:", err);
-  }
-}
-
-// Multer storage configuration
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `avatar-${uniqueSuffix}${ext}`);
-  },
-});
+// Multer memory storage configuration (allows base64 encoding without relying on local disks)
+const storage = multer.memoryStorage();
 
 // File filter (only allow images)
 const fileFilter = (req, file, cb) => {
@@ -55,17 +35,19 @@ router.post("/", auth, upload.single("avatar"), (req, res, next) => {
     return next(new AppError("Please upload an avatar image file", 400));
   }
 
-  // Construct absolute static URL for the image
-  const serverPort = process.env.PORT || 5000;
-  const protocol = req.protocol;
-  const host = req.hostname === "localhost" ? `localhost:${serverPort}` : req.headers.host;
-  const fileUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
+  try {
+    // Convert file buffer to base64 data URL
+    const base64Data = req.file.buffer.toString("base64");
+    const fileUrl = `data:${req.file.mimetype};base64,${base64Data}`;
 
-  res.json({
-    success: true,
-    message: "Avatar uploaded successfully",
-    url: fileUrl,
-  });
+    res.json({
+      success: true,
+      message: "Avatar uploaded successfully",
+      url: fileUrl,
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 export default router;
