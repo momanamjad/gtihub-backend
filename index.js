@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import mongoose from 'mongoose';
@@ -5,7 +6,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
-import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -28,8 +28,6 @@ import projectRoutes from './routes/projects.js';
 
 // Import error handling
 import { errorHandler } from './utils/errorHandler.js';
-
-dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
