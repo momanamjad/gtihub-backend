@@ -33,6 +33,16 @@ router.post('/', auth, asyncHandler(async (req, res) => {
   const { repoId } = req.params;
   const { title, description, sourceBranch, targetBranch } = req.body;
   
+  if (!title?.trim()) {
+    return res.status(400).json({ message: 'PR title is required' });
+  }
+
+  const src = sourceBranch || 'main';
+  const tgt = targetBranch || 'main';
+  if (src === tgt) {
+    return res.status(400).json({ message: 'Source and target branches must be different' });
+  }
+
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
 
@@ -45,8 +55,8 @@ router.post('/', auth, asyncHandler(async (req, res) => {
     title,
     description,
     author: req.user.id,
-    sourceBranch: sourceBranch || 'main',
-    targetBranch: targetBranch || 'main'
+    sourceBranch: src,
+    targetBranch: tgt
   });
 
   pr.number = await PullRequest.countDocuments({ repository: repoId }) + 1;
@@ -91,7 +101,7 @@ router.post('/:id/merge', auth, asyncHandler(async (req, res) => {
   
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
-  if (repo.owner.toString() !== req.user.id) throw new AppError('Unauthorized to merge', 401);
+  if (repo.owner.toString() !== req.user.id) throw new AppError('Unauthorized to merge', 403);
 
   const pr = await PullRequest.findById(id);
   if (!pr) throw new AppError('Pull Request not found', 404);
@@ -180,14 +190,15 @@ router.post('/:id/line-comments', auth, asyncHandler(async (req, res) => {
   };
 
   pr.comments = pr.comments || [];
-  pr.comments.push(commentObj);
+  const commentDoc = pr.comments.create(commentObj);
+  pr.comments.push(commentDoc);
   await pr.save();
 
   // Populate author info
   const populatedPr = await PullRequest.findById(req.params.id)
     .populate('comments.author', 'login avatar_url');
 
-  const savedComment = populatedPr.comments[populatedPr.comments.length - 1];
+  const savedComment = populatedPr.comments.id(commentDoc._id);
 
   successResponse(res, savedComment, 'Line comment posted successfully', 201);
 }));
