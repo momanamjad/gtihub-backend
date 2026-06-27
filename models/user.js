@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
 
 const userSchema = new mongoose.Schema({
-  login: { type: String, required: true, unique: true, index: true },
-  email: { type: String, required: true, unique: true, index: true },
+  login: { type: String, required: true, unique: true, index: true, minlength: 1, maxlength: 39, trim: true },
+  email: { type: String, required: true, unique: true, index: true, maxlength: 254, trim: true },
   password: { type: String, required: true, select: false },
   avatar_url: { type: String, default: "" },
   name: { type: String, default: "" },

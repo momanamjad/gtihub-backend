@@ -1,6 +1,7 @@
 import Repository from '../models/repository.js';
 import Star from '../models/star.js';
 import Pin from '../models/pin.js';
+import crypto from 'crypto';
 import Issue from '../models/issue.js';
 import User from '../models/user.js';
 import Notification from '../models/notification.js';
@@ -75,7 +76,7 @@ export const createRepository = async (userId, repoData) => {
 
   const user = await User.findById(userId);
   const username = user?.login || 'ghost';
-  const commitHash = Math.random().toString(16).substring(2, 9);
+  const commitHash = crypto.randomBytes(20).toString('hex');
 
   const filesToInsert = [];
   const hasInitialFiles = repoData.addReadme || repoData.gitignoreTemplate || repoData.license;
@@ -196,7 +197,9 @@ All rights reserved.`;
     });
   }
 
-  await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
+  if (repo.visibility === 'public') {
+    await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
+  }
   
   return repo;
 };
@@ -273,7 +276,9 @@ export const deleteRepository = async (repoId, userId) => {
   await Star.deleteMany({ repository: repoId });
   await Pin.deleteMany({ repository: repoId });
 
-  await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: -1 } });
+  if (repo.visibility === 'public') {
+    await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: -1 } });
+  }
   return { message: 'Repository deleted' };
 };
 
@@ -594,7 +599,7 @@ export const addRepoFileNode = async (repoId, userId, { name, path, type, conten
   const username = user?.login || 'ghost';
   const msg = commitMessage || `Create ${name}`;
   const commitDate = new Date();
-  const commitHash = Math.random().toString(16).substring(2, 9);
+  const commitHash = crypto.randomBytes(20).toString('hex');
 
   const node = new FileNode({ 
     repository: repoId, 
@@ -636,7 +641,7 @@ export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, 
   const username = user?.login || 'ghost';
   const msg = commitMessage || `Update ${node.name}`;
   const commitDate = new Date();
-  const commitHash = Math.random().toString(16).substring(2, 9);
+  const commitHash = crypto.randomBytes(20).toString('hex');
 
   if (name) node.name = name;
   if (path) {

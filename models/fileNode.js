@@ -9,7 +9,7 @@ const fileNodeSchema = new mongoose.Schema({
   content: { type: String, default: "" },
   parentPath: { type: String, default: "" },
   lastCommitMessage: { type: String, default: "Initial commit" },
-  lastCommitAuthor: { type: String, default: "momanamjad" },
+  lastCommitAuthor: { type: String, default: "unknown" },
   lastCommitDate: { type: Date, default: Date.now }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
