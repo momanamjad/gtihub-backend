@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 const issueSchema = new mongoose.Schema({
   repository: { type: mongoose.Schema.Types.ObjectId, ref: 'Repository', required: true },
+  number: { type: Number },
   creator: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   assignee: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   title: { type: String, required: true },

@@ -419,7 +419,8 @@ export const createIssue = async (repoId, userId, issueData) => {
     throw new AppError('Unauthorized access to private repository', 403);
   }
 
-  const issue = new Issue({ ...issueData, repository: repoId, creator: userId });
+  const issueNumber = (await Issue.countDocuments({ repository: repoId })) + 1;
+  const issue = new Issue({ ...issueData, repository: repoId, creator: userId, number: issueNumber });
   await issue.save();
   await Repository.findByIdAndUpdate(repoId, { $inc: { issues_count: 1 } });
 
