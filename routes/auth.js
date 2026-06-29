@@ -246,7 +246,7 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
-    console.warn('WARNING: GOOGLE_CLIENT_ID is not configured in environment variables.');
+    throw new AppError('Google Sign-In is not configured on this server', 503);
   }
 
   let payload;
@@ -282,7 +282,7 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
     }
 
     // Generate a secure random password for DB requirement
-    const randomPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).toUpperCase().slice(-10);
+    const randomPassword = crypto.randomBytes(32).toString('hex');
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(randomPassword, salt);
 
@@ -340,9 +340,8 @@ router.post('/forgot-password', asyncHandler(async (req, res) => {
   await user.save();
 
   // Create reset link
-  const origin = req.headers.referer || req.headers.origin || 'http://localhost:5173';
-  const parsedOrigin = new URL(origin);
-  const resetUrl = `${parsedOrigin.origin}/reset-password?token=${resetToken}`;
+  const frontendOrigin = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const resetUrl = `${frontendOrigin}/reset-password?token=${resetToken}`;
 
   await sendResetEmail(user.email, resetUrl);
 
@@ -393,8 +392,8 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
   user.password = await bcrypt.hash(password, salt);
   
   // Clear reset token fields
-  user.resetPasswordToken = "";
-  user.resetPasswordExpires = undefined;
+  user.resetPasswordToken = null;
+  user.resetPasswordExpires = null;
 
   await user.save();
 

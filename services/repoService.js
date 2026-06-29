@@ -9,6 +9,8 @@ import Contribution from '../models/contribution.js';
 import { AppError } from '../utils/errorHandler.js';
 import { recordContribution } from './userService.js';
 
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const GITIGNORE_TEMPLATES = {
   node: `node_modules/
 npm-debug.log
@@ -74,7 +76,7 @@ export const createRepository = async (userId, repoData) => {
   await repo.save();
 
   const user = await User.findById(userId);
-  const username = user?.login || 'momanamjad';
+  const username = user?.login || 'unknown';
   const commitHash = Math.random().toString(16).substring(2, 9);
 
   const filesToInsert = [];
@@ -365,10 +367,10 @@ export const searchRepositories = async ({ q, page = 1, limit = 10, language = n
   // Parse language:Lang
   const langMatch = searchString.match(/language:([^\s]+)/);
   if (langMatch) {
-    query.language = new RegExp('^' + langMatch[1] + '$', 'i');
+    query.language = new RegExp('^' + escapeRegex(langMatch[1]) + '$', 'i');
     searchString = searchString.replace(/language:[^\s]+/, '').trim();
   } else if (language) {
-    query.language = new RegExp('^' + language + '$', 'i');
+    query.language = new RegExp('^' + escapeRegex(language) + '$', 'i');
   }
 
   // Parse visibility:Visibility
@@ -540,7 +542,7 @@ export const getRepoFileTree = async (repoId, viewerId, branch = 'main') => {
           type: n.type,
           content: n.content,
           lastCommitMessage: n.lastCommitMessage || 'Initial commit',
-          lastCommitAuthor: n.lastCommitAuthor || 'momanamjad',
+          lastCommitAuthor: n.lastCommitAuthor || 'unknown',
           lastCommitDate: n.lastCommitDate || n.updated_at || new Date()
         };
         if (n.type === 'dir') {
@@ -580,7 +582,7 @@ export const addRepoFileNode = async (repoId, userId, { name, path, type, conten
   if (existing) throw new AppError('File or directory already exists', 400);
 
   const user = await User.findById(userId);
-  const username = user?.login || 'momanamjad';
+  const username = user?.login || 'unknown';
   const msg = commitMessage || `Create ${name}`;
   const commitDate = new Date();
   const commitHash = Math.random().toString(16).substring(2, 9);
@@ -622,7 +624,7 @@ export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, 
   if (!node) throw new AppError('File not found', 404);
 
   const user = await User.findById(userId);
-  const username = user?.login || 'momanamjad';
+  const username = user?.login || 'unknown';
   const msg = commitMessage || `Update ${node.name}`;
   const commitDate = new Date();
   const commitHash = Math.random().toString(16).substring(2, 9);
@@ -631,7 +633,7 @@ export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, 
   if (path) {
     const oldPrefix = oldPath + '/';
     const newPrefix = path + '/';
-    const childrenQuery = buildBranchQuery(repoId, branch, { path: new RegExp('^' + oldPrefix) });
+    const childrenQuery = buildBranchQuery(repoId, branch, { path: new RegExp('^' + escapeRegex(oldPrefix)) });
     const children = await FileNode.find(childrenQuery);
     for (const child of children) {
       child.path = child.path.replace(oldPrefix, newPrefix);
@@ -675,7 +677,7 @@ export const deleteRepoFileNode = async (repoId, userId, path, branch = 'main') 
   if (!node) throw new AppError('File not found', 404);
 
   if (node.type === 'dir') {
-    const childrenQuery = buildBranchQuery(repoId, branch, { path: new RegExp('^' + path + '(/|$)') });
+    const childrenQuery = buildBranchQuery(repoId, branch, { path: new RegExp('^' + escapeRegex(path) + '(/|$)') });
     await FileNode.deleteMany(childrenQuery);
   } else {
     await node.deleteOne();

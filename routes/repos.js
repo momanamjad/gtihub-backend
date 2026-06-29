@@ -14,12 +14,18 @@ import Secret from '../models/secret.js';
 import FileNode from '../models/fileNode.js';
 import { recordContribution } from '../services/userService.js';
 
-const ENCRYPTION_KEY = process.env.SECRET_ENCRYPTION_KEY || 'a_very_secure_and_long_32_byte_key_fallback';
 const IV_LENGTH = 16;
+
+function getEncryptionKey() {
+  const key = process.env.SECRET_ENCRYPTION_KEY;
+  if (!key) throw new Error('SECRET_ENCRYPTION_KEY environment variable must be set');
+  return key;
+}
 
 function encrypt(text) {
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY.padEnd(32).substring(0, 32)), iv);
+  const key = Buffer.from(getEncryptionKey().padEnd(32).substring(0, 32));
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
   let encrypted = cipher.update(text);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString('hex') + ':' + encrypted.toString('hex');
