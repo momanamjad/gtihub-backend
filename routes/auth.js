@@ -27,7 +27,7 @@ const setTokenCookies = (res, accessToken, refreshToken) => {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    maxAge: 15 * 60 * 1000 // 15 minutes
   });
 
   res.cookie('refreshToken', refreshToken, {
@@ -204,8 +204,19 @@ router.post('/refresh', asyncHandler(async (req, res) => {
   }
   
   const userId = await authService.verifyRefreshToken(refreshToken);
+
+  // Verify token matches what's stored in DB (rotation check)
+  const user = await (await import('../models/user.js')).default.findById(userId).select('+refreshToken');
+  if (!user || user.refreshToken !== refreshToken) {
+    throw new AppError('Refresh token has been revoked or rotated', 401);
+  }
+
   const { accessToken: newAccessToken, refreshToken: newRefreshToken } = authService.generateTokens(userId);
-  
+
+  // Rotate: save new refresh token to DB
+  user.refreshToken = newRefreshToken;
+  await user.save();
+
   setTokenCookies(res, newAccessToken, newRefreshToken);
   successResponse(res, { accessToken: newAccessToken, refreshToken: newRefreshToken }, 'Token refreshed successfully');
 }));
@@ -217,7 +228,13 @@ router.post('/refresh', asyncHandler(async (req, res) => {
  *     summary: Logout user
  *     tags: [Auth]
  */
-router.post('/logout', asyncHandler(async (req, res) => {
+router.post('/logout', auth, asyncHandler(async (req, res) => {
+  // Invalidate the refresh token in DB
+  const user = await (await import('../models/user.js')).default.findById(req.user.id);
+  if (user) {
+    user.refreshToken = null;
+    await user.save();
+  }
   clearTokenCookies(res);
   successResponse(res, null, 'Logged out successfully');
 }));

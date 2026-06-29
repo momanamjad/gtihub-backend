@@ -424,6 +424,10 @@ router.patch('/:id/projects/cards/:cardId', auth, asyncHandler(async (req, res) 
   const card = await ProjectCard.findById(req.params.cardId);
   if (!card) throw new AppError('Card not found', 404);
 
+  if (card.creator.toString() !== req.user.id.toString()) {
+    throw new AppError('Unauthorized: only the card creator can update this card', 403);
+  }
+
   if (title !== undefined) card.title = title;
   if (description !== undefined) card.description = description;
   if (column !== undefined) card.column = column;
@@ -435,6 +439,10 @@ router.patch('/:id/projects/cards/:cardId', auth, asyncHandler(async (req, res) 
 router.delete('/:id/projects/cards/:cardId', auth, asyncHandler(async (req, res) => {
   const card = await ProjectCard.findById(req.params.cardId);
   if (!card) throw new AppError('Card not found', 404);
+
+  if (card.creator.toString() !== req.user.id.toString()) {
+    throw new AppError('Unauthorized: only the card creator can delete this card', 403);
+  }
 
   await ProjectCard.deleteOne({ _id: req.params.cardId });
   successResponse(res, null, 'Card deleted successfully');

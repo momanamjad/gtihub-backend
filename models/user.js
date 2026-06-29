@@ -21,6 +21,7 @@ const userSchema = new mongoose.Schema({
   public_repos_count: { type: Number, default: 0 },
   resetPasswordToken: { type: String, default: null },
   resetPasswordExpires: { type: Date },
+  refreshToken: { type: String, default: null, select: false },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 userSchema.index({ login: 'text', name: 'text' });
