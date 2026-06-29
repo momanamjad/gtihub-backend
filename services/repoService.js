@@ -1,7 +1,6 @@
 import Repository from '../models/repository.js';
 import Star from '../models/star.js';
 import Pin from '../models/pin.js';
-import crypto from 'crypto';
 import Issue from '../models/issue.js';
 import User from '../models/user.js';
 import Notification from '../models/notification.js';
@@ -9,6 +8,8 @@ import FileNode from '../models/fileNode.js';
 import Contribution from '../models/contribution.js';
 import { AppError } from '../utils/errorHandler.js';
 import { recordContribution } from './userService.js';
+
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const GITIGNORE_TEMPLATES = {
   node: `node_modules/
@@ -75,8 +76,8 @@ export const createRepository = async (userId, repoData) => {
   await repo.save();
 
   const user = await User.findById(userId);
-  const username = user?.login || 'ghost';
-  const commitHash = crypto.randomBytes(20).toString('hex');
+  const username = user?.login || 'unknown';
+  const commitHash = Math.random().toString(16).substring(2, 9);
 
   const filesToInsert = [];
   const hasInitialFiles = repoData.addReadme || repoData.gitignoreTemplate || repoData.license;
@@ -197,9 +198,7 @@ All rights reserved.`;
     });
   }
 
-  if (repo.visibility === 'public') {
-    await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
-  }
+  await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: 1 } });
   
   return repo;
 };
@@ -256,11 +255,7 @@ export const updateRepository = async (repoId, userId, updates) => {
   if (!repo) throw new AppError('Repository not found', 404);
   if (repo.owner.toString() !== userId) throw new AppError('Unauthorized', 401);
 
-  const allowed = ['name', 'description', 'language', 'visibility', 'topics', 'branches', 'tags', 'license'];
-  const safeUpdates = {};
-  allowed.forEach(k => { if (k in updates) safeUpdates[k] = updates[k]; });
-
-  Object.assign(repo, safeUpdates);
+  Object.assign(repo, updates);
   await repo.save();
   return repo;
 };
@@ -276,9 +271,7 @@ export const deleteRepository = async (repoId, userId) => {
   await Star.deleteMany({ repository: repoId });
   await Pin.deleteMany({ repository: repoId });
 
-  if (repo.visibility === 'public') {
-    await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: -1 } });
-  }
+  await User.findByIdAndUpdate(userId, { $inc: { public_repos_count: -1 } });
   return { message: 'Repository deleted' };
 };
 
@@ -341,8 +334,6 @@ export const togglePin = async (repoId, userId) => {
   await pin.save();
   return { message: 'Pinned' };
 };
-
-const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export const searchRepositories = async ({ q, page = 1, limit = 10, language = null }) => {
   const skip = (page - 1) * limit;
@@ -419,8 +410,7 @@ export const createIssue = async (repoId, userId, issueData) => {
     throw new AppError('Unauthorized access to private repository', 403);
   }
 
-  const issueNumber = (await Issue.countDocuments({ repository: repoId })) + 1;
-  const issue = new Issue({ ...issueData, repository: repoId, creator: userId, number: issueNumber });
+  const issue = new Issue({ ...issueData, repository: repoId, creator: userId });
   await issue.save();
   await Repository.findByIdAndUpdate(repoId, { $inc: { issues_count: 1 } });
 
@@ -490,11 +480,6 @@ export const updateIssue = async (repoId, issueId, userId, updateData) => {
   const issue = await Issue.findOne({ _id: issueId, repository: repoId, is_deleted: false });
   if (!issue) throw new AppError('Issue not found', 404);
 
-  // Verify the requester is either the issue creator or the repository owner
-  if (issue.creator.toString() !== userId.toString() && repo.owner.toString() !== userId.toString()) {
-    throw new AppError('Forbidden', 403);
-  }
-
   const allowedFields = ['title', 'description', 'state', 'labels', 'assignee', 'milestone'];
   for (const field of allowedFields) {
     if (updateData[field] !== undefined) {
@@ -557,7 +542,7 @@ export const getRepoFileTree = async (repoId, viewerId, branch = 'main') => {
           type: n.type,
           content: n.content,
           lastCommitMessage: n.lastCommitMessage || 'Initial commit',
-          lastCommitAuthor: n.lastCommitAuthor || 'ghost',
+          lastCommitAuthor: n.lastCommitAuthor || 'unknown',
           lastCommitDate: n.lastCommitDate || n.updated_at || new Date()
         };
         if (n.type === 'dir') {
@@ -597,10 +582,10 @@ export const addRepoFileNode = async (repoId, userId, { name, path, type, conten
   if (existing) throw new AppError('File or directory already exists', 400);
 
   const user = await User.findById(userId);
-  const username = user?.login || 'ghost';
+  const username = user?.login || 'unknown';
   const msg = commitMessage || `Create ${name}`;
   const commitDate = new Date();
-  const commitHash = crypto.randomBytes(20).toString('hex');
+  const commitHash = Math.random().toString(16).substring(2, 9);
 
   const node = new FileNode({ 
     repository: repoId, 
@@ -639,10 +624,10 @@ export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, 
   if (!node) throw new AppError('File not found', 404);
 
   const user = await User.findById(userId);
-  const username = user?.login || 'ghost';
+  const username = user?.login || 'unknown';
   const msg = commitMessage || `Update ${node.name}`;
   const commitDate = new Date();
-  const commitHash = crypto.randomBytes(20).toString('hex');
+  const commitHash = Math.random().toString(16).substring(2, 9);
 
   if (name) node.name = name;
   if (path) {

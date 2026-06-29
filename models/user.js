@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
 
 const userSchema = new mongoose.Schema({
-  login: { type: String, required: true, unique: true, index: true, minlength: 1, maxlength: 39, trim: true },
-  email: { type: String, required: true, unique: true, index: true, maxlength: 254, trim: true },
+  login: { type: String, required: true, unique: true, index: true },
+  email: { type: String, required: true, unique: true, index: true },
   password: { type: String, required: true, select: false },
   avatar_url: { type: String, default: "" },
   name: { type: String, default: "" },
@@ -11,7 +11,6 @@ const userSchema = new mongoose.Schema({
   location: { type: String, default: "" },
   blog: { type: String, default: "" },
   pronouns: { type: String, default: "" },
-  socialLinks: { type: [String], default: [] },
   status: {
     emoji: { type: String, default: "" },
     text: { type: String, default: "" },
@@ -22,7 +21,6 @@ const userSchema = new mongoose.Schema({
   public_repos_count: { type: Number, default: 0 },
   resetPasswordToken: { type: String, default: null },
   resetPasswordExpires: { type: Date },
-  refreshToken: { type: String, default: "" },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 userSchema.index({ login: 'text', name: 'text' });

@@ -27,7 +27,7 @@ const setTokenCookies = (res, accessToken, refreshToken) => {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? 'none' : 'lax',
-    maxAge: 15 * 60 * 1000 // 15 minutes
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   });
 
   res.cookie('refreshToken', refreshToken, {
@@ -204,19 +204,8 @@ router.post('/refresh', asyncHandler(async (req, res) => {
   }
   
   const userId = await authService.verifyRefreshToken(refreshToken);
-  
-  // Verify the incoming refresh token matches the one stored in the DB
-  const user = await User.findById(userId);
-  if (!user || user.refreshToken !== refreshToken) {
-    throw new AppError('Invalid refresh token, authorization denied', 401);
-  }
-
   const { accessToken: newAccessToken, refreshToken: newRefreshToken } = authService.generateTokens(userId);
   
-  // Save new refresh token to DB (rotating/invalidating the old one)
-  user.refreshToken = newRefreshToken;
-  await user.save();
-
   setTokenCookies(res, newAccessToken, newRefreshToken);
   successResponse(res, { accessToken: newAccessToken, refreshToken: newRefreshToken }, 'Token refreshed successfully');
 }));
@@ -229,15 +218,6 @@ router.post('/refresh', asyncHandler(async (req, res) => {
  *     tags: [Auth]
  */
 router.post('/logout', asyncHandler(async (req, res) => {
-  const refreshToken = req.cookies?.refreshToken;
-  if (refreshToken) {
-    try {
-      const userId = await authService.verifyRefreshToken(refreshToken);
-      await User.findByIdAndUpdate(userId, { refreshToken: "" });
-    } catch (err) {
-      // Ignore token verification errors during logout
-    }
-  }
   clearTokenCookies(res);
   successResponse(res, null, 'Logged out successfully');
 }));
@@ -266,7 +246,7 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
-    return res.status(503).json({ message: "Google Sign-In is not configured" });
+    throw new AppError('Google Sign-In is not configured on this server', 503);
   }
 
   let payload;
@@ -295,13 +275,10 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
     if (!baseLogin) baseLogin = 'user';
     
     let login = baseLogin;
-    let attempts = 0;
+    let counter = 1;
     while (await User.findOne({ login })) {
-      if (++attempts > 10) {
-        login = `user_${crypto.randomBytes(8).toString('hex')}`;
-      } else {
-        login = `${baseLogin}${Math.floor(Math.random() * 9999)}`;
-      }
+      login = `${baseLogin}${counter}`;
+      counter++;
     }
 
     // Generate a secure random password for DB requirement
@@ -320,9 +297,6 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
   }
 
   const { accessToken, refreshToken } = authService.generateTokens(user.id);
-  user.refreshToken = refreshToken;
-  await user.save();
-  
   const userObj = user.toObject();
   delete userObj.password;
 
@@ -348,9 +322,8 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
  */
 router.post('/forgot-password', asyncHandler(async (req, res) => {
   const { email } = req.body;
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!email || !emailRegex.test(email)) {
-    return res.status(400).json({ message: 'Invalid email address' });
+  if (!email) {
+    throw new AppError('Email is required', 400);
   }
 
   const user = await User.findOne({ email });
@@ -367,8 +340,8 @@ router.post('/forgot-password', asyncHandler(async (req, res) => {
   await user.save();
 
   // Create reset link
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-  const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
+  const frontendOrigin = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const resetUrl = `${frontendOrigin}/reset-password?token=${resetToken}`;
 
   await sendResetEmail(user.email, resetUrl);
 
@@ -399,8 +372,8 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
   }
 
   // Verify password requirements
-  if (password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
-    throw new AppError('Password must be at least 8 characters long and contain at least one uppercase letter and one number', 400);
+  if (password.length < 6) {
+    throw new AppError('Password must be at least 6 characters long', 400);
   }
 
   const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
