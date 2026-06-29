@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
 import cookieParser from 'cookie-parser';
+import compression from 'compression';
 import http from 'http';
 import { Server } from 'socket.io';
 import { notificationEmitter } from './utils/eventEmitter.js';
@@ -89,7 +90,27 @@ app.use(cors({
   credentials: true,
 }));
 
-app.options(/.*/, cors());
+// Fix wildcard CORS pre-flight to use configured origins
+app.options(/.*/, cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
+
+// Gzip compression — must be before routes
+app.use(compression({ level: 6, threshold: 1024 }));
+
+// Cache-Control for GET API responses (30s stale-while-revalidate)
+app.use('/api/', (req, res, next) => {
+  if (req.method === 'GET') {
+    res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+  } else {
+    res.set('Cache-Control', 'no-store');
+  }
+  next();
+});
 
 // Security Middleware
 app.use(helmet({
