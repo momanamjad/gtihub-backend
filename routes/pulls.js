@@ -8,6 +8,8 @@ import { asyncHandler, AppError } from '../utils/errorHandler.js';
 import { recordContribution } from '../services/userService.js';
 import Comment from '../models/comment.js';
 
+import FileNode from '../models/fileNode.js';
+
 const router = express.Router({ mergeParams: true });
 
 // List all PRs for a repository
@@ -112,6 +114,38 @@ router.post('/:id/merge', auth, asyncHandler(async (req, res) => {
   const hasChangesRequested = activeReviews.some(r => r.state === 'CHANGES_REQUESTED');
   if (hasChangesRequested) {
     throw new AppError('Cannot merge: Changes are requested by a reviewer. Please resolve comments first.', 400);
+  }
+
+  // ─── File Synchronization (Actual DB Merge) ──────────────────────
+  const sourceQuery = { repository: repoId };
+  if (pr.sourceBranch === 'main') {
+    sourceQuery.$or = [{ branch: 'main' }, { branch: { $exists: false } }, { branch: null }];
+  } else {
+    sourceQuery.branch = pr.sourceBranch;
+  }
+  const sourceNodes = await FileNode.find(sourceQuery).lean();
+
+  const targetQuery = { repository: repoId };
+  if (pr.targetBranch === 'main') {
+    targetQuery.$or = [{ branch: 'main' }, { branch: { $exists: false } }, { branch: null }];
+  } else {
+    targetQuery.branch = pr.targetBranch;
+  }
+  
+  // Wipe out the old target branch tree
+  await FileNode.deleteMany(targetQuery);
+
+  // Copy new tree nodes across
+  const clonedNodes = sourceNodes.map(node => {
+    const { _id, createdAt, updatedAt, ...rest } = node;
+    return {
+      ...rest,
+      branch: pr.targetBranch
+    };
+  });
+
+  if (clonedNodes.length > 0) {
+    await FileNode.insertMany(clonedNodes);
   }
 
   pr.status = 'merged';
