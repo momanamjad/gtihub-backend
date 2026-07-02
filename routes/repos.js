@@ -13,6 +13,7 @@ import WorkflowRun from '../models/workflowRun.js';
 import Secret from '../models/secret.js';
 import FileNode from '../models/fileNode.js';
 import { recordContribution } from '../services/userService.js';
+import { triggerWorkflowRun } from '../utils/workflowHelper.js';
 
 const IV_LENGTH = 16;
 
@@ -348,6 +349,46 @@ router.get('/:id/commits', optionalAuth, asyncHandler(async (req, res) => {
   successResponse(res, commits);
 }));
 
+router.get('/:id/commits/:commitId', optionalAuth, asyncHandler(async (req, res) => {
+  const { id, commitId } = req.params;
+  
+  const repo = await Repository.findById(id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  if (repo.visibility === 'private' && (!req.user || repo.owner.toString() !== req.user.id.toString())) {
+    throw new AppError('Unauthorized', 403);
+  }
+
+  const Contribution = (await import('../models/contribution.js')).default;
+  const commit = await Contribution.findById(commitId);
+  if (!commit) throw new AppError('Commit not found', 404);
+
+  const FileNode = (await import('../models/fileNode.js')).default;
+  const changedNodes = await FileNode.find({ 
+    repository: id, 
+    lastCommitMessage: commit.commitMessage 
+  }).lean();
+
+  const files = changedNodes.map(node => {
+    const fileLines = (node.content || '').split('\n');
+    const diff = fileLines.map(line => `+ ${line}`).join('\n');
+    
+    return {
+      name: node.path,
+      additions: fileLines.length,
+      deletions: 0,
+      diff: diff
+    };
+  });
+
+  successResponse(res, {
+    hash: commit.commitHash || commit._id.toString().substring(0, 7),
+    message: commit.commitMessage || commit.type.replace(/_/g, ' '),
+    author: commit.commitAuthor || 'unknown',
+    date: commit.created_at,
+    files
+  });
+}));
+
 router.get('/:id/branches', optionalAuth, asyncHandler(async (req, res) => {
   const branches = await repoService.getBranches(req.params.id, req.user?.id);
   successResponse(res, branches);
@@ -551,8 +592,15 @@ router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
   if (repo.owner.toString() !== req.user.id.toString()) throw new AppError('Unauthorized', 401);
 
-  const { files } = req.body;
+  const { files, commitMessage } = req.body;
   if (!Array.isArray(files)) throw new AppError('Files list must be an array', 400);
+
+  const commitMsg = commitMessage || 'Sync repository files';
+  const authorName = req.user.login || 'unknown';
+  const commitDate = new Date();
+  
+  const crypto = await import('crypto');
+  const commitHash = crypto.randomBytes(20).toString('hex');
 
   // 1. Delete all current file nodes
   await FileNode.deleteMany({ repository: req.params.id });
@@ -564,7 +612,11 @@ router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
     path: file.path,
     type: file.type || 'file',
     content: file.content || "",
-    parentPath: file.parentPath || ""
+    parentPath: file.parentPath || "",
+    branch: file.branch || 'main',
+    lastCommitMessage: commitMsg,
+    lastCommitAuthor: authorName,
+    lastCommitDate: commitDate
   }));
 
   if (formattedNodes.length > 0) {
@@ -572,7 +624,53 @@ router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
   }
 
   // 3. Record a contribution (Push Commit)
-  await recordContribution(req.user.id, 'file_updated', req.params.id);
+  await recordContribution(req.user.id, 'file_updated', req.params.id, {
+    commitMessage: commitMsg,
+    commitAuthor: authorName,
+    commitHash: commitHash
+  });
+
+  // 4. Automatic Issue/PR closing from commit message
+  const issueRegex = /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)/gi;
+  let match;
+  const issueNumbers = [];
+  while ((match = issueRegex.exec(commitMsg)) !== null) {
+    issueNumbers.push(parseInt(match[1], 10));
+  }
+
+  if (issueNumbers.length > 0) {
+    const Issue = (await import('../models/issue.js')).default;
+    const Comment = (await import('../models/comment.js')).default;
+    const PullRequest = (await import('../models/pullRequest.js')).default;
+
+    for (const num of issueNumbers) {
+      const issue = await Issue.findOne({ repository: req.params.id, number: num, state: 'open' });
+      if (issue) {
+        issue.state = 'closed';
+        await issue.save();
+
+        const systemComment = new Comment({
+          issue: issue._id,
+          user: req.user.id,
+          body: `Closed automatically by commit message referencing this issue (${commitHash.substring(0, 7)}).`
+        });
+        await systemComment.save();
+        
+        issue.comments_count += 1;
+        await issue.save();
+      }
+
+      const pr = await PullRequest.findOne({ repository: req.params.id, number: num, status: 'open' });
+      if (pr) {
+        pr.status = 'closed';
+        await pr.save();
+      }
+    }
+  }
+
+  // 5. Trigger automated actions workflow run
+  const activeBranch = (files && files.length > 0) ? (files[0].branch || 'main') : 'main';
+  await triggerWorkflowRun(req.params.id, activeBranch);
 
   successResponse(res, null, 'Repository file tree synced successfully');
 }));

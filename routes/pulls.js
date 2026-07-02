@@ -7,6 +7,7 @@ import { successResponse, errorResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
 import { recordContribution } from '../services/userService.js';
 import Comment from '../models/comment.js';
+import { triggerWorkflowRun } from '../utils/workflowHelper.js';
 
 import FileNode from '../models/fileNode.js';
 
@@ -177,6 +178,9 @@ router.post('/:id/merge', auth, asyncHandler(async (req, res) => {
       console.error('Failed to create merge notification:', notifErr);
     }
   }
+
+  // Trigger automated Actions CI/CD workflow run for the merged branch
+  await triggerWorkflowRun(repoId, pr.targetBranch || 'main');
 
   successResponse(res, pr, 'Pull Request merged successfully');
 }));
