@@ -51,11 +51,27 @@ export const login = async ({ email, password }) => {
   let user = await User.findOne({ email }).select('+password');
   if (!user) throw new AppError('Invalid Credentials', 400);
 
+  // Check if account is locked
+  if (user.lockUntil && user.lockUntil > Date.now()) {
+    const minutesLeft = Math.ceil((user.lockUntil - Date.now()) / (60 * 1000));
+    throw new AppError(`Account is temporarily locked. Try again in ${minutesLeft} minutes.`, 423);
+  }
+
   const isMatch = await bcrypt.compare(password, user.password);
-  if (!isMatch) throw new AppError('Invalid Credentials', 400);
+  if (!isMatch) {
+    user.loginAttempts = (user.loginAttempts || 0) + 1;
+    if (user.loginAttempts >= 5) {
+      user.lockUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes lockout
+      user.loginAttempts = 0; // reset attempts
+    }
+    await user.save();
+    throw new AppError('Invalid Credentials', 400);
+  }
 
   const { accessToken, refreshToken } = generateTokens(user.id);
   user.refreshToken = refreshToken;
+  user.loginAttempts = 0;
+  user.lockUntil = undefined;
   await user.save();
   
   const userObj = user.toObject();

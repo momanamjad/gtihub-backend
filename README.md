@@ -4,23 +4,24 @@ A full-featured backend API for a GitHub clone application built with Node.js, E
 
 ## ✨ Features
 
-- **User Authentication** - JWT-based registration and login
-- **Repository Management** - Create, read, update, delete repositories
+- **User Authentication** - JWT-based registration and login with HttpOnly secure token storage
+- **Brute Force Lockout** - 30-minute account locking after 5 consecutive incorrect password checks
+- **Repository Management** - Create, read, update, delete repositories using fast projections and lean reads
 - **Social Features** - Follow/unfollow users, star repositories, pin favorites
 - **Issue Tracking** - Create and manage repository issues
 - **Notifications** - Real-time notifications for user actions
 - **Search** - Search users and repositories
-- **Security** - Input validation, rate limiting, helmet security headers
-- **API Documentation** - Interactive Swagger/OpenAPI docs
-- **Pagination** - Efficient data retrieval with pagination support
-- **Error Handling** - Comprehensive error handling with meaningful messages
+- **Security** - Input validation, rate limiting, helmet CSP headers with dynamic nonces, Swagger token protection
+- **API Documentation** - Interactive Swagger/OpenAPI docs gated behind security checks
+- **Database Optimizations** - Mongoose pool tuning and compound indexes
+- **Error Handling** - Global unhandled promise rejection and process exception catching
 
 ## 🛠️ Tech Stack
 
 - **Runtime**: Node.js
 - **Framework**: Express.js
 - **Database**: MongoDB with Mongoose
-- **Authentication**: JWT (JSON Web Tokens)
+- **Authentication**: JWT (JSON Web Tokens) in HttpOnly cookies
 - **Security**: Helmet, bcryptjs, express-rate-limit
 - **Validation**: Joi
 - **Documentation**: Swagger/OpenAPI
@@ -58,6 +59,7 @@ PORT=5000
 NODE_ENV=development
 JWT_SECRET=your_jwt_secret_key_here_change_in_production
 CORS_ORIGIN=http://localhost:3000,http://localhost:5000
+DOCS_TOKEN=your_swagger_token_here
 ```
 
 5. **Start MongoDB**
@@ -80,10 +82,11 @@ Server will run on `http://localhost:5000`
 ## 📚 API Documentation
 
 ### Swagger UI
-Interactive API documentation available at:
+Interactive API documentation available in development at:
 ```
 http://localhost:5000/api/docs
 ```
+*Note: In production environments, access requires the `DOCS_TOKEN` passed as a query string or `x-docs-token` header.*
 
 ### Health Check
 ```
@@ -92,12 +95,8 @@ GET http://localhost:5000/health
 
 ## 🔐 Authentication
 
-All protected endpoints require one of:
-```javascript
-// Header 1: Bearer Token
-Authorization: Bearer <jwt_token>
+All protected endpoints require HttpOnly cookie verification.
 
-// Header 2: Custom Token Header
 x-auth-token: <jwt_token>
 ```
 

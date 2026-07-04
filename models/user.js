@@ -22,6 +22,8 @@ const userSchema = new mongoose.Schema({
   resetPasswordToken: { type: String, default: null },
   resetPasswordExpires: { type: Date },
   refreshToken: { type: String, default: null, select: false },
+  loginAttempts: { type: Number, required: true, default: 0 },
+  lockUntil: { type: Date },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 userSchema.index({ login: 'text', name: 'text' });
