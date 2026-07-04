@@ -206,10 +206,12 @@ All rights reserved.`;
 export const getUserRepositories = async (userId, { page = 1, limit = 10, sort = '-created_at' }) => {
   const skip = (page - 1) * limit;
   const repos = await Repository.find({ owner: userId, is_deleted: false })
+    .select('-fileTree -branches -tags')
     .populate('owner', 'login name avatar_url')
     .sort(sort)
     .skip(skip)
-    .limit(limit);
+    .limit(limit)
+    .lean();
 
   const total = await Repository.countDocuments({ owner: userId, is_deleted: false });
 
@@ -223,10 +225,12 @@ export const getPublicRepositories = async ({ page = 1, limit = 10, sort = '-cre
   if (language) query.language = language;
 
   const repos = await Repository.find(query)
+    .select('-fileTree -branches -tags')
     .populate('owner', 'login avatar_url')
     .sort(sort)
     .skip(skip)
-    .limit(limit);
+    .limit(limit)
+    .lean();
 
   const total = await Repository.countDocuments(query);
 
@@ -236,15 +240,17 @@ export const getPublicRepositories = async ({ page = 1, limit = 10, sort = '-cre
 export const getRepositoryById = async (repoId, viewerId) => {
   const repo = await Repository.findById(repoId)
     .populate('owner', 'login avatar_url followers_count')
-    .populate('issues_count');
+    .populate('issues_count')
+    .lean();
 
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
 
-  if (repo.visibility === 'private' && (!viewerId || repo.owner._id.toString() !== viewerId.toString())) {
+  const ownerId = repo.owner?._id || repo.owner;
+  if (repo.visibility === 'private' && (!viewerId || ownerId.toString() !== viewerId.toString())) {
     throw new AppError('Unauthorized access to private repository', 403);
   }
   
-  const repoObj = repo.toObject();
+  const repoObj = repo;
   repoObj.fileTree = await getRepoFileTree(repoId, viewerId);
   repoObj.isWatching = viewerId ? (repo.watchers || []).some(id => id.toString() === viewerId.toString()) : false;
   return repoObj;

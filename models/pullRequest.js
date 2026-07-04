@@ -31,4 +31,7 @@ pullRequestSchema.pre('save', function(next) {
   next();
 });
 
+pullRequestSchema.index({ repository: 1, status: 1 });
+pullRequestSchema.index({ author: 1 });
+
 export default mongoose.model('PullRequest', pullRequestSchema);

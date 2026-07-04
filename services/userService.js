@@ -23,18 +23,28 @@ export const recordContribution = async (userId, type, repositoryId = null, extr
 };
 
 export const getUserPublicProfile = async (username, viewerId) => {
-  const user = await User.findOne({ login: username }).select('-password');
+  const user = await User.findOne({ login: username }).select('-password').lean();
   if (!user) throw new AppError('User not found', 404);
 
-  const isOwner = viewerId && viewerId === user._id.toString();
+  const userIdStr = user._id.toString();
+  const isOwner = viewerId && viewerId === userIdStr;
 
   const repoQuery = { owner: user._id, is_deleted: false };
   if (!isOwner) {
     repoQuery.visibility = 'public';
   }
 
-  const repos = await Repository.find(repoQuery).populate('owner', 'login name avatar_url');
-  let pins = await Pin.find({ user: user._id }).populate('repository').sort('order');
+  const repos = await Repository.find(repoQuery)
+    .select('-fileTree -branches -tags')
+    .populate('owner', 'login name avatar_url')
+    .lean();
+  let pins = await Pin.find({ user: user._id })
+    .populate({
+      path: 'repository',
+      select: '-fileTree -branches -tags'
+    })
+    .sort('order')
+    .lean();
   
   if (!isOwner) {
     pins = pins.filter(pin => pin.repository && !pin.repository.is_deleted && pin.repository.visibility === 'public');
@@ -70,21 +80,24 @@ export const getUserPublicProfile = async (username, viewerId) => {
       $sort: { date: 1 }
     }
   ]);
-  const userObj = user.toObject();
+  const userObj = user;
   userObj.contributions = contributions;
   
   let isFollowing = false;
   if (viewerId) {
-    const followRecord = await Follower.findOne({ follower: viewerId, following: user._id });
+    const followRecord = await Follower.findOne({ follower: viewerId, following: user._id }).lean();
     isFollowing = !!followRecord;
   }
   userObj.isFollowing = isFollowing;
-  userObj._id = user._id.toString();
+  userObj._id = userIdStr;
 
-  const stars = await Star.find({ user: user._id }).populate({
-    path: 'repository',
-    populate: { path: 'owner', select: 'login name avatar_url' }
-  });
+  const stars = await Star.find({ user: user._id })
+    .populate({
+      path: 'repository',
+      select: '-fileTree -branches -tags',
+      populate: { path: 'owner', select: 'login name avatar_url' }
+    })
+    .lean();
   const starredRepos = stars.map(s => s.repository).filter(r => r && !r.is_deleted);
   
   return { user: userObj, repos, pins, starredRepos };
@@ -110,7 +123,8 @@ export const searchUsers = async ({ q, page = 1, limit = 10 }) => {
   const users = await User.find({ login: { $regex: q, $options: 'i' } })
     .select('login name avatar_url followers_count public_repos_count')
     .skip(skip)
-    .limit(limit);
+    .limit(limit)
+    .lean();
 
   const total = await User.countDocuments({ login: { $regex: q, $options: 'i' } });
 

@@ -102,27 +102,41 @@ app.options(/.*/, cors({
 // Gzip compression — must be before routes
 app.use(compression({ level: 6, threshold: 1024 }));
 
-// Cache-Control for GET API responses (30s stale-while-revalidate)
+// Cache-Control for GET API responses (30s stale-while-revalidate for public, none for private/auth)
 app.use('/api/', (req, res, next) => {
   if (req.method === 'GET') {
-    res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+    // Auth and profile routes should not be cached
+    if (req.path.startsWith('/auth/') || req.path.includes('/profile') || req.path.includes('/users/me')) {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    } else {
+      res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+    }
   } else {
     res.set('Cache-Control', 'no-store');
   }
   next();
 });
 
+// Nonce generation middleware for CSP
+import crypto from 'crypto';
+app.use((req, res, next) => {
+  res.locals.nonce = crypto.randomBytes(16).toString('base64');
+  next();
+});
+
 // Security Middleware
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      scriptSrc: ["'self'", "'unsafe-inline'"]
-    }
-  },
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
+app.use((req, res, next) => {
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        scriptSrc: ["'self'", `'nonce-${res.locals.nonce}'`]
+      }
+    },
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+  })(req, res, next);
+});
 
 // Rate Limiting
 const generalLimiter = rateLimit({
@@ -198,7 +212,11 @@ const connectDB = async (req, res, next) => {
 
     // Otherwise, connect
     console.log('🔄 Connecting to MongoDB...');
-    await mongoose.connect(dbUri);
+    await mongoose.connect(dbUri, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000
+    });
     console.log('✅ Connected to MongoDB');
     next();
   } catch (err) {
@@ -211,6 +229,20 @@ const connectDB = async (req, res, next) => {
 };
 
 app.use(connectDB);
+
+// Swagger Documentation Gating Middleware
+const checkDocsAuth = (req, res, next) => {
+  if (process.env.NODE_ENV === 'development') {
+    return next();
+  }
+  const token = req.headers['x-docs-token'] || req.query.token;
+  if (process.env.DOCS_TOKEN && token === process.env.DOCS_TOKEN) {
+    return next();
+  }
+  res.status(403).json({ success: false, message: 'Swagger documentation access denied.' });
+};
+
+app.use('/api/docs', checkDocsAuth);
 
 // Swagger Documentation
 app.use('/api/docs', swaggerUi.serve);
@@ -285,6 +317,9 @@ app.use((req, res) => {
 // Global Error Handler
 app.use(errorHandler);
 
+// Enable ETags globally
+app.set('etag', 'strong');
+
 const PORT = process.env.PORT || 5000;
 
 // Only listen if not in Vercel environment
@@ -296,5 +331,15 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
 } else if (process.env.VERCEL) {
   console.log('✅ Running on Vercel');
 }
+
+// Handle unhandled promise rejections and exceptions
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('🚨 Uncaught Exception thrown:', err);
+  process.exit(1);
+});
 
 export default app;
