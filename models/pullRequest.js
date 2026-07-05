@@ -5,6 +5,8 @@ const pullRequestSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String, default: "" },
   status: { type: String, enum: ['open', 'closed', 'merged'], default: 'open', index: true },
+  hasConflicts: { type: Boolean, default: false },
+  conflictedFiles: [{ type: String }],
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   sourceBranch: { type: String, default: '' },
   targetBranch: { type: String, default: 'main' },

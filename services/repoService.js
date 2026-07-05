@@ -69,21 +69,34 @@ build/
 };
 
 export const createRepository = async (userId, repoData) => {
-  const repo = new Repository({ 
-    ...repoData, 
-    owner: userId 
+  const user = await User.findById(userId);
+  const username = user?.login || 'unknown';
+
+  // Security-safe: only mark as profile README when repo name matches login AND is public.
+  // Private repos with matching names are NOT treated as profile READMEs.
+  const isProfileReadme =
+    repoData.name?.toLowerCase() === username.toLowerCase() &&
+    repoData.visibility === 'public';
+
+  // Always initialize with README when it's the profile readme repo
+  const finalRepoData = isProfileReadme
+    ? { ...repoData, addReadme: true }
+    : repoData;
+
+  const repo = new Repository({
+    ...finalRepoData,
+    owner: userId,
+    is_profile_readme: isProfileReadme,
   });
   await repo.save();
 
-  const user = await User.findById(userId);
-  const username = user?.login || 'unknown';
   const commitHash = Math.random().toString(16).substring(2, 9);
 
   const filesToInsert = [];
-  const hasInitialFiles = repoData.addReadme || repoData.gitignoreTemplate || repoData.license;
+  const hasInitialFiles = finalRepoData.addReadme || finalRepoData.gitignoreTemplate || finalRepoData.license;
 
   if (hasInitialFiles) {
-    if (repoData.addReadme) {
+    if (finalRepoData.addReadme) {
       filesToInsert.push({ 
         repository: repo._id, 
         branch: 'main',
@@ -101,7 +114,9 @@ export const createRepository = async (userId, repoData) => {
         type: 'file', 
         name: 'README.md', 
         path: 'README.md', 
-        content: `# ${repoData.name}\n${repoData.description || ''}\n`, 
+        content: isProfileReadme
+          ? `### Hi there 👋\n\nI'm **${username}**, a developer who loves building amazing things!\n\n<!--\n**${username}/${username}** is a ✨ _special_ ✨ repository because its \`README.md\` (this file) appears on your GitHub profile.\n\nHere are some ideas to get you started:\n- 🔭 I'm currently working on ...\n- 🌱 I'm currently learning ...\n- 👯 I'm looking to collaborate on ...\n- 💬 Ask me about ...\n- 📫 How to reach me: ...\n-->\n`
+          : `# ${finalRepoData.name}\n${finalRepoData.description || ''}\n`,
         parentPath: '', 
         lastCommitMessage: 'Initial commit', 
         lastCommitAuthor: username, 
@@ -109,8 +124,8 @@ export const createRepository = async (userId, repoData) => {
       });
     }
 
-    if (repoData.gitignoreTemplate) {
-      const templateName = repoData.gitignoreTemplate.toLowerCase();
+    if (finalRepoData.gitignoreTemplate) {
+      const templateName = finalRepoData.gitignoreTemplate.toLowerCase();
       const content = GITIGNORE_TEMPLATES[templateName] || `# .gitignore for ${templateName}\nnode_modules/\n`;
       filesToInsert.push({ 
         repository: repo._id, 
@@ -126,8 +141,8 @@ export const createRepository = async (userId, repoData) => {
       });
     }
 
-    if (repoData.license) {
-      const licenseName = repoData.license.toLowerCase();
+    if (finalRepoData.license) {
+      const licenseName = finalRepoData.license.toLowerCase();
       const year = new Date().getFullYear();
       let content = "";
       if (licenseName.includes("mit")) {
@@ -169,7 +184,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.`;
       } else {
-        content = `${repoData.license}
+        content = `${finalRepoData.license}
 
 Copyright (c) ${year} ${username}
 All rights reserved.`;
@@ -732,19 +747,22 @@ export const createBranch = async (repoId, userId, branchName) => {
   }
 
   const cleanName = branchName.trim();
-  
-  if (!repo.branches || repo.branches.length === 0) {
-    repo.branches = ['main'];
-  } else if (!repo.branches.includes('main')) {
-    repo.branches.unshift('main');
-  }
 
-  if (repo.branches.includes(cleanName)) {
+  // Atomically check and add the branch to Repository branches array.
+  // We query for the repository and ensure cleanName is not already in branches.
+  // If it's already there, findOneAndUpdate will return null.
+  const updatedRepo = await Repository.findOneAndUpdate(
+    { _id: repoId, owner: userId, branches: { $ne: cleanName } },
+    { $addToSet: { branches: cleanName } },
+    { new: true }
+  );
+
+  if (!updatedRepo) {
     throw new AppError('Branch already exists', 400);
   }
 
   // Clone base branch's file tree to the new branch
-  const baseBranch = repo.branches.includes('main') ? 'main' : repo.branches[0] || 'main';
+  const baseBranch = repo.branches?.includes('main') ? 'main' : repo.branches?.[0] || 'main';
   const baseQuery = buildBranchQuery(repoId, baseBranch);
   const baseNodes = await FileNode.find(baseQuery).lean();
   const newNodes = baseNodes.map(node => {
@@ -758,16 +776,14 @@ export const createBranch = async (repoId, userId, branchName) => {
     await FileNode.insertMany(newNodes);
   }
 
-  repo.branches.push(cleanName);
-  await repo.save();
-  return repo.branches;
+  return updatedRepo.branches;
 };
 
 export const compareBranches = async (repoId, sourceBranch, targetBranch) => {
   const sourceQuery = buildBranchQuery(repoId, sourceBranch, { type: 'file' });
   const targetQuery = buildBranchQuery(repoId, targetBranch, { type: 'file' });
-  const sourceNodes = await FileNode.find(sourceQuery).lean();
-  const targetNodes = await FileNode.find(targetQuery).lean();
+  const sourceNodes = await FileNode.find(sourceQuery).select('path content').limit(500).lean();
+  const targetNodes = await FileNode.find(targetQuery).select('path content').limit(500).lean();
 
   const sourceMap = new Map(sourceNodes.map(n => [n.path, n]));
   const targetMap = new Map(targetNodes.map(n => [n.path, n]));
