@@ -49,6 +49,17 @@ router.post('/', auth, asyncHandler(async (req, res) => {
   const repo = await Repository.findById(repoId);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
 
+  // Prevent duplicate PRs for the same source/target branches
+  const existingPR = await PullRequest.findOne({
+    repository: repoId,
+    sourceBranch: src,
+    targetBranch: tgt,
+    status: 'open'
+  });
+  if (existingPR) {
+    return res.status(400).json({ message: 'A pull request for these branches already exists.' });
+  }
+
   if (repo.visibility === 'private' && repo.owner.toString() !== req.user.id.toString()) {
     throw new AppError('Unauthorized access to private repository', 403);
   }
