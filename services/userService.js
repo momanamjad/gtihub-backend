@@ -5,6 +5,7 @@ import Star from '../models/star.js';
 import Follower from '../models/follower.js';
 import Notification from '../models/notification.js';
 import Contribution from '../models/contribution.js';
+import FileNode from '../models/fileNode.js';
 import { AppError } from '../utils/errorHandler.js';
 
 export const recordContribution = async (userId, type, repositoryId = null, extraData = {}) => {
@@ -34,72 +35,108 @@ export const getUserPublicProfile = async (username, viewerId) => {
     repoQuery.visibility = 'public';
   }
 
-  const repos = await Repository.find(repoQuery)
-    .select('-fileTree -branches -tags')
-    .populate('owner', 'login name avatar_url')
-    .lean();
-  let pins = await Pin.find({ user: user._id })
-    .populate({
-      path: 'repository',
-      select: '-fileTree -branches -tags'
-    })
-    .sort('order')
-    .lean();
-  
-  if (!isOwner) {
-    pins = pins.filter(pin => pin.repository && !pin.repository.is_deleted && pin.repository.visibility === 'public');
-  }
-
   // Aggregate contributions in the last 365 days
   const oneYearAgo = new Date();
   oneYearAgo.setDate(oneYearAgo.getDate() - 365);
 
-  const contributions = await Contribution.aggregate([
-    {
-      $match: {
-        user: user._id,
-        created_at: { $gte: oneYearAgo }
+  const [repos, rawPins, contributions, followRecord, stars] = await Promise.all([
+    Repository.find(repoQuery)
+      .select('-fileTree -branches -tags')
+      .populate('owner', 'login name avatar_url')
+      .lean(),
+    Pin.find({ user: user._id })
+      .populate({
+        path: 'repository',
+        select: '-fileTree -branches -tags'
+      })
+      .sort('order')
+      .lean(),
+    Contribution.aggregate([
+      {
+        $match: {
+          user: user._id,
+          created_at: { $gte: oneYearAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$created_at" }
+          },
+          count: { $sum: "$count" }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          date: "$_id",
+          count: 1
+        }
+      },
+      {
+        $sort: { date: 1 }
       }
-    },
-    {
-      $group: {
-        _id: {
-          $dateToString: { format: "%Y-%m-%d", date: "$created_at" }
-        },
-        count: { $sum: "$count" }
-      }
-    },
-    {
-      $project: {
-        _id: 0,
-        date: "$_id",
-        count: 1
-      }
-    },
-    {
-      $sort: { date: 1 }
-    }
+    ]),
+    viewerId ? Follower.findOne({ follower: viewerId, following: user._id }).lean() : null,
+    Star.find({ user: user._id })
+      .populate({
+        path: 'repository',
+        select: '-fileTree -branches -tags',
+        populate: { path: 'owner', select: 'login name avatar_url' }
+      })
+      .lean()
   ]);
+
+  let pins = rawPins;
+  if (!isOwner) {
+    pins = pins.filter(pin => pin.repository && !pin.repository.is_deleted && pin.repository.visibility === 'public');
+  }
+
   const userObj = user;
   userObj.contributions = contributions;
-  
-  let isFollowing = false;
-  if (viewerId) {
-    const followRecord = await Follower.findOne({ follower: viewerId, following: user._id }).lean();
-    isFollowing = !!followRecord;
-  }
-  userObj.isFollowing = isFollowing;
+  userObj.isFollowing = !!followRecord;
   userObj._id = userIdStr;
 
-  const stars = await Star.find({ user: user._id })
-    .populate({
-      path: 'repository',
-      select: '-fileTree -branches -tags',
-      populate: { path: 'owner', select: 'login name avatar_url' }
-    })
-    .lean();
   const starredRepos = stars.map(s => s.repository).filter(r => r && !r.is_deleted);
-  
+
+  // ── Profile README ─────────────────────────────────────────────────────────
+  // Security rules (all three must pass):
+  //   1. is_profile_readme flag is explicitly set to true in DB
+  //   2. Repo name exactly matches the user's login (case-insensitive)
+  //   3. Repo visibility is strictly 'public'
+  // This ensures private repos NEVER leak their content.
+  let profileReadmeContent = null;
+  try {
+    const profileReadmeRepo = repos.find(
+      r =>
+        r.is_profile_readme === true &&
+        r.name?.toLowerCase() === user.login?.toLowerCase() &&
+        r.visibility === 'public' &&
+        !r.is_deleted
+    );
+
+    if (profileReadmeRepo) {
+      const readmeNode = await FileNode.findOne({
+        repository: profileReadmeRepo._id,
+        name: { $regex: /^readme\.md$/i },
+        type: 'file',
+        branch: 'main',
+      })
+        .select('content') // Only fetch content — never expose other node metadata
+        .lean();
+
+      if (readmeNode?.content) {
+        // Cap at 50,000 chars to prevent memory exhaustion from huge READMEs
+        profileReadmeContent = readmeNode.content.substring(0, 50000);
+      }
+    }
+  } catch (err) {
+    // Non-fatal: profile README is optional, never block the profile response
+    console.error('[userService] Failed to fetch profile README content:', err.message);
+  }
+  userObj.profileReadmeContent = profileReadmeContent;
+  // ───────────────────────────────────────────────────────────────────────────
+
   return { user: userObj, repos, pins, starredRepos };
 };
 
@@ -120,13 +157,14 @@ export const updateProfile = async (userId, updates) => {
 
 export const searchUsers = async ({ q, page = 1, limit = 10 }) => {
   const skip = (page - 1) * limit;
-  const users = await User.find({ login: { $regex: q, $options: 'i' } })
+  const escapedQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const users = await User.find({ login: { $regex: escapedQ, $options: 'i' } })
     .select('login name avatar_url followers_count public_repos_count')
     .skip(skip)
     .limit(limit)
     .lean();
 
-  const total = await User.countDocuments({ login: { $regex: q, $options: 'i' } });
+  const total = await User.countDocuments({ login: { $regex: escapedQ, $options: 'i' } });
 
   return { users, total };
 };

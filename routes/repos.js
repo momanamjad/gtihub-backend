@@ -55,6 +55,8 @@ const router = express.Router();
  *               visibility: { type: string, enum: [public, private] }
  */
 router.post('/', auth, validateRequest(createRepoValidator), asyncHandler(async (req, res) => {
+  // Note: profile README detection (name === login) is handled in repoService.createRepository
+  // which has access to the real user.login from DB. The JWT only contains { id }.
   const repo = await repoService.createRepository(req.user.id, req.validated);
   successResponse(res, repo, 'Repository created successfully', 201);
 }));

@@ -26,6 +26,8 @@ import copilotRoutes from './routes/copilot.js';
 import uploadRoutes from './routes/upload.js';
 import wikiRoutes from './routes/wiki.js';
 import projectRoutes from './routes/projects.js';
+import searchRoutes from './routes/search.js';
+import releaseRoutes from './routes/releases.js';
 
 // Import error handling
 import { errorHandler } from './utils/errorHandler.js';
@@ -285,6 +287,8 @@ app.use('/api/mcp', mcpRoutes);
 app.use('/api/copilot', copilotRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/projects', projectRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/repos/:repoId/releases', releaseRoutes);
 app.get('/uploads/:filename', (req, res) => {
   const safeFilename = path.basename(req.params.filename);
   

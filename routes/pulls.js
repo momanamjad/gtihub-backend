@@ -8,8 +8,8 @@ import { asyncHandler, AppError } from '../utils/errorHandler.js';
 import { recordContribution } from '../services/userService.js';
 import Comment from '../models/comment.js';
 import { triggerWorkflowRun } from '../utils/workflowHelper.js';
-
 import FileNode from '../models/fileNode.js';
+import { checkBranchesForConflicts, generateConflictContent } from '../utils/conflictHelper.js';
 
 const router = express.Router({ mergeParams: true });
 
@@ -53,13 +53,17 @@ router.post('/', auth, asyncHandler(async (req, res) => {
     throw new AppError('Unauthorized access to private repository', 403);
   }
 
+  const { hasConflicts, conflictedFiles } = await checkBranchesForConflicts(repoId, src, tgt);
+
   const pr = new PullRequest({
     repository: repoId,
     title,
     description,
     author: req.user.id,
     sourceBranch: src,
-    targetBranch: tgt
+    targetBranch: tgt,
+    hasConflicts,
+    conflictedFiles
   });
 
   pr.number = await PullRequest.countDocuments({ repository: repoId }) + 1;
@@ -115,6 +119,11 @@ router.post('/:id/merge', auth, asyncHandler(async (req, res) => {
   const hasChangesRequested = activeReviews.some(r => r.state === 'CHANGES_REQUESTED');
   if (hasChangesRequested) {
     throw new AppError('Cannot merge: Changes are requested by a reviewer. Please resolve comments first.', 400);
+  }
+
+  // Conflict block guard: check if PR has conflicts
+  if (pr.hasConflicts) {
+    throw new AppError('Cannot merge: This branch has conflicts that must be resolved first.', 400);
   }
 
   // ─── File Synchronization (Actual DB Merge) ──────────────────────
@@ -297,6 +306,98 @@ router.get('/:id/reviews', optionalAuth, asyncHandler(async (req, res) => {
   }
 
   successResponse(res, pr.reviews || []);
+}));
+
+// GET conflicted files and their contents with markers
+router.get('/:id/conflicts', auth, asyncHandler(async (req, res) => {
+  const pr = await PullRequest.findById(req.params.id);
+  if (!pr) throw new AppError('Pull Request not found', 404);
+
+  const { repoId } = req.params;
+  const buildQuery = (branchName, filePath) => {
+    const query = { repository: repoId, path: filePath, type: 'file' };
+    if (branchName === 'main') {
+      query.$or = [{ branch: 'main' }, { branch: { $exists: false } }, { branch: null }];
+    } else {
+      query.branch = branchName;
+    }
+    return query;
+  };
+
+  const conflictsData = [];
+
+  for (const filePath of pr.conflictedFiles) {
+    const sourceNode = await FileNode.findOne(buildQuery(pr.sourceBranch, filePath)).lean();
+    const targetNode = await FileNode.findOne(buildQuery(pr.targetBranch, filePath)).lean();
+
+    const targetContent = targetNode?.content || "";
+    const sourceContent = sourceNode?.content || "";
+
+    const contentWithMarkers = generateConflictContent(
+      targetContent,
+      sourceContent,
+      pr.targetBranch,
+      pr.sourceBranch
+    );
+
+    conflictsData.push({
+      path: filePath,
+      content: contentWithMarkers,
+      targetContent,
+      sourceContent
+    });
+  }
+
+  successResponse(res, conflictsData);
+}));
+
+// POST resolve conflicts and commit to source branch
+router.post('/:id/resolve', auth, asyncHandler(async (req, res) => {
+  const pr = await PullRequest.findById(req.params.id);
+  if (!pr) throw new AppError('Pull Request not found', 404);
+  if (pr.status !== 'open') throw new AppError('Pull Request is already ' + pr.status, 400);
+
+  const { repoId } = req.params;
+  const { resolvedFiles } = req.body; // e.g. { "src/App.jsx": "resolved code..." }
+
+  if (!resolvedFiles || typeof resolvedFiles !== 'object') {
+    throw new AppError('resolvedFiles object is required', 400);
+  }
+
+  const buildUpdateQuery = (branchName, filePath) => {
+    const query = { repository: repoId, path: filePath, type: 'file' };
+    if (branchName === 'main') {
+      query.$or = [{ branch: 'main' }, { branch: { $exists: false } }, { branch: null }];
+    } else {
+      query.branch = branchName;
+    }
+    return query;
+  };
+
+  // For each resolved file, update its content in the source branch
+  for (const [filePath, content] of Object.entries(resolvedFiles)) {
+    // Verify it was actually a conflicted file
+    if (!pr.conflictedFiles.includes(filePath)) continue;
+
+    // Update FileNode in sourceBranch
+    const sourceNode = await FileNode.findOne(buildUpdateQuery(pr.sourceBranch, filePath));
+    if (sourceNode) {
+      sourceNode.content = content;
+      sourceNode.lastCommitMessage = 'Resolve merge conflicts';
+      sourceNode.lastCommitAuthor = req.user?.login || 'system';
+      sourceNode.lastCommitDate = new Date();
+      await sourceNode.save();
+    }
+  }
+
+  // Re-run conflict check
+  const { hasConflicts, conflictedFiles } = await checkBranchesForConflicts(repoId, pr.sourceBranch, pr.targetBranch);
+  
+  pr.hasConflicts = hasConflicts;
+  pr.conflictedFiles = conflictedFiles;
+  await pr.save();
+
+  successResponse(res, pr, 'Conflicts resolved and committed successfully');
 }));
 
 export default router;
