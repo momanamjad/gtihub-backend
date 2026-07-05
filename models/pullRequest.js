@@ -26,11 +26,10 @@ const pullRequestSchema = new mongoose.Schema({
   }]
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
-pullRequestSchema.pre('save', function(next) {
+pullRequestSchema.pre('save', function() {
   if (this.sourceBranch === this.targetBranch) {
-    return next(new Error('Source and target branches must be different'));
+    throw new Error('Source and target branches must be different');
   }
-  next();
 });
 
 pullRequestSchema.index({ repository: 1, status: 1 });
