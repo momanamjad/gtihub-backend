@@ -118,9 +118,9 @@ export const getUserPublicProfile = async (username, viewerId) => {
     if (profileReadmeRepo) {
       const readmeNode = await FileNode.findOne({
         repository: profileReadmeRepo._id,
-        name: { $regex: /^readme\.md$/i },
-        type: 'file',
         branch: 'main',
+        type: 'file',
+        path: { $in: ["README.md", "readme.md", "Readme.md", "README.MD"] }
       })
         .select('content') // Only fetch content — never expose other node metadata
         .lean();

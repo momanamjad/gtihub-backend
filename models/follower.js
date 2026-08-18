@@ -7,5 +7,6 @@ const followerSchema = new mongoose.Schema({
 
 // Ensure unique followers
 followerSchema.index({ follower: 1, following: 1 }, { unique: true });
+followerSchema.index({ following: 1 });
 
 export default mongoose.model('Follower', followerSchema);

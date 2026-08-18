@@ -255,6 +255,8 @@ router.post('/logout', auth, asyncHandler(async (req, res) => {
  *             properties:
  *               credential: { type: string }
  */
+let googleClient;
+
 router.post('/google-signin', asyncHandler(async (req, res) => {
   const { credential } = req.body;
   if (!credential) {
@@ -268,8 +270,10 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
 
   let payload;
   try {
-    const client = new OAuth2Client(clientId);
-    const ticket = await client.verifyIdToken({
+    if (!googleClient) {
+      googleClient = new OAuth2Client(clientId);
+    }
+    const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: clientId,
     });
