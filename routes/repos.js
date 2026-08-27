@@ -12,6 +12,7 @@ import ProjectCard from '../models/project.js';
 import WorkflowRun from '../models/workflowRun.js';
 import Secret from '../models/secret.js';
 import FileNode from '../models/fileNode.js';
+import User from '../models/user.js';
 import { recordContribution } from '../services/userService.js';
 import { triggerWorkflowRun } from '../utils/workflowHelper.js';
 
@@ -597,6 +598,35 @@ router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
   const { files, commitMessage } = req.body;
   if (!Array.isArray(files)) throw new AppError('Files list must be an array', 400);
 
+  const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+  let newRepoSize = 0;
+
+  for (const file of files) {
+    if (file.type === 'file' || !file.type) {
+      const size = Buffer.byteLength(file.content || '', 'utf8');
+      if (size > MAX_FILE_SIZE) {
+        throw new AppError(`File ${file.name} exceeds the maximum allowed size of 100MB`, 413);
+      }
+      file.size = size;
+      newRepoSize += size;
+    } else {
+      file.size = 0;
+    }
+  }
+
+  const user = await User.findById(req.user.id);
+  const oldRepoSize = repo.size || 0;
+  
+  if ((user.storage_used || 0) - oldRepoSize + newRepoSize > (user.storage_limit || 1048576000)) {
+    throw new AppError('Storage quota exceeded. Please upgrade your plan or free up space.', 413);
+  }
+
+  user.storage_used = Math.max(0, (user.storage_used || 0) - oldRepoSize + newRepoSize);
+  await user.save();
+
+  repo.size = newRepoSize;
+  await repo.save();
+
   const commitMsg = commitMessage || 'Sync repository files';
   const authorName = req.user.login || 'unknown';
   const commitDate = new Date();
@@ -615,6 +645,7 @@ router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
     type: file.type || 'file',
     content: file.content || "",
     parentPath: file.parentPath || "",
+    size: file.size || 0,
     branch: file.branch || 'main',
     lastCommitMessage: commitMsg,
     lastCommitAuthor: authorName,

@@ -608,6 +608,20 @@ export const addRepoFileNode = async (repoId, userId, { name, path, type, conten
   const commitDate = new Date();
   const commitHash = Math.random().toString(16).substring(2, 9);
 
+  let fileSize = 0;
+  if (type === 'file' || !type) {
+    fileSize = Buffer.byteLength(content || '', 'utf8');
+    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+    if (fileSize > MAX_FILE_SIZE) {
+      throw new AppError(`File ${name} exceeds the maximum allowed size of 100MB`, 413);
+    }
+  }
+
+  const owner = await User.findById(userId);
+  if ((owner.storage_used || 0) + fileSize > (owner.storage_limit || 1048576000)) {
+    throw new AppError('Storage quota exceeded. Please upgrade your plan or free up space.', 413);
+  }
+
   const node = new FileNode({ 
     repository: repoId, 
     branch,
@@ -616,11 +630,18 @@ export const addRepoFileNode = async (repoId, userId, { name, path, type, conten
     type, 
     content, 
     parentPath,
+    size: fileSize,
     lastCommitMessage: msg,
     lastCommitAuthor: username,
     lastCommitDate: commitDate
   });
   await node.save();
+
+  repo.size = (repo.size || 0) + fileSize;
+  await repo.save();
+
+  owner.storage_used = (owner.storage_used || 0) + fileSize;
+  await owner.save();
 
   // Propagate commit message to parent directories recursively
   await propagateDirectoryCommit(repoId, branch, parentPath, msg, username, commitDate);
@@ -650,6 +671,23 @@ export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, 
   const commitDate = new Date();
   const commitHash = Math.random().toString(16).substring(2, 9);
 
+  let newSize = node.size || 0;
+  let sizeDiff = 0;
+  if (content !== undefined) {
+    newSize = Buffer.byteLength(content, 'utf8');
+    const MAX_FILE_SIZE = 100 * 1024 * 1024;
+    if (newSize > MAX_FILE_SIZE) {
+      throw new AppError(`File ${node.name || name} exceeds the maximum allowed size of 100MB`, 413);
+    }
+    sizeDiff = newSize - (node.size || 0);
+  }
+
+  if (sizeDiff > 0) {
+    if ((user.storage_used || 0) + sizeDiff > (user.storage_limit || 1048576000)) {
+      throw new AppError('Storage quota exceeded. Please upgrade your plan or free up space.', 413);
+    }
+  }
+
   if (name) node.name = name;
   if (path) {
     const oldPrefix = oldPath + '/';
@@ -667,11 +705,21 @@ export const updateRepoFileNode = async (repoId, userId, oldPath, { name, path, 
     node.path = path;
     node.parentPath = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
   }
-  if (content !== undefined) node.content = content;
+  if (content !== undefined) {
+    node.content = content;
+    node.size = newSize;
+  }
 
   node.lastCommitMessage = msg;
   node.lastCommitAuthor = username;
   node.lastCommitDate = commitDate;
+
+  if (sizeDiff !== 0) {
+    repo.size = (repo.size || 0) + sizeDiff;
+    await repo.save();
+    user.storage_used = Math.max(0, (user.storage_used || 0) + sizeDiff);
+    await user.save();
+  }
 
   await node.save();
 
@@ -697,11 +745,26 @@ export const deleteRepoFileNode = async (repoId, userId, path, branch = 'main') 
   const node = await FileNode.findOne(query);
   if (!node) throw new AppError('File not found', 404);
 
+  let sizeFreed = 0;
+
   if (node.type === 'dir') {
     const childrenQuery = buildBranchQuery(repoId, branch, { path: new RegExp('^' + escapeRegex(path) + '(/|$)') });
+    const children = await FileNode.find(childrenQuery);
+    sizeFreed = children.reduce((acc, curr) => acc + (curr.size || 0), 0);
     await FileNode.deleteMany(childrenQuery);
   } else {
+    sizeFreed = node.size || 0;
     await node.deleteOne();
+  }
+
+  if (sizeFreed > 0) {
+    repo.size = Math.max(0, (repo.size || 0) - sizeFreed);
+    await repo.save();
+    const user = await User.findById(userId);
+    if (user) {
+      user.storage_used = Math.max(0, (user.storage_used || 0) - sizeFreed);
+      await user.save();
+    }
   }
 
   return { message: 'File deleted successfully' };

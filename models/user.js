@@ -24,6 +24,8 @@ const userSchema = new mongoose.Schema({
   refreshToken: { type: String, default: null, select: false },
   loginAttempts: { type: Number, required: true, default: 0 },
   lockUntil: { type: Date },
+  storage_used: { type: Number, default: 0 },
+  storage_limit: { type: Number, default: 1048576000 }, // 1GB default limit
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 userSchema.index({ login: 'text', name: 'text' });

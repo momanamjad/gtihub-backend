@@ -24,6 +24,7 @@ const repositorySchema = new mongoose.Schema({
   is_deleted: { type: Boolean, default: false, index: true },
   is_profile_readme: { type: Boolean, default: false, index: true },
   license: { type: String, default: "MIT License" },
+  size: { type: Number, default: 0 },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 repositorySchema.index({ owner: 1, is_deleted: 1 });

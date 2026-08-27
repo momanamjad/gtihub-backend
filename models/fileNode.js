@@ -8,6 +8,7 @@ const fileNodeSchema = new mongoose.Schema({
   type: { type: String, enum: ['file', 'dir'], required: true },
   content: { type: String, default: "" },
   parentPath: { type: String, default: "" },
+  size: { type: Number, default: 0 },
   lastCommitMessage: { type: String, default: "Initial commit" },
   lastCommitAuthor: { type: String, default: "unknown" },
   lastCommitDate: { type: Date, default: Date.now }
