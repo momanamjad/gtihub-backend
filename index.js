@@ -47,11 +47,7 @@ const allowedOrigins = process.env.CORS_ORIGIN
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
+      callback(null, true);
     },
     credentials: true,
     methods: ["GET", "POST"]
@@ -85,13 +81,7 @@ notificationEmitter.on('newNotification', (notification) => {
 
 app.use(cors({
   origin: (origin, callback) => {
-    // allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
+    callback(null, true); // Allow all origins dynamically
   },
   credentials: true,
 }));
@@ -99,8 +89,7 @@ app.use(cors({
 // Fix wildcard CORS pre-flight to use configured origins
 app.options(/.*/, cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
-    callback(new Error('Not allowed by CORS'));
+    callback(null, true); // Allow all origins dynamically
   },
   credentials: true,
 }));
