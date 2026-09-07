@@ -2,6 +2,7 @@ import express from 'express';
 import PullRequest from '../models/pullRequest.js';
 import Repository from '../models/repository.js';
 import Notification from '../models/notification.js';
+import BranchProtection from '../models/branchProtection.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
 import { successResponse, errorResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
@@ -130,6 +131,15 @@ router.post('/:id/merge', auth, asyncHandler(async (req, res) => {
   const hasChangesRequested = activeReviews.some(r => r.state === 'CHANGES_REQUESTED');
   if (hasChangesRequested) {
     throw new AppError('Cannot merge: Changes are requested by a reviewer. Please resolve comments first.', 400);
+  }
+
+  // Branch Protection Check
+  const protection = await BranchProtection.findOne({ repository: repoId, branch: pr.targetBranch });
+  if (protection && protection.require_pr_reviews) {
+    const approvingReviewsCount = activeReviews.filter(r => r.state === 'APPROVED').length;
+    if (approvingReviewsCount < protection.required_approving_review_count) {
+      throw new AppError(`Cannot merge: Branch protection requires at least ${protection.required_approving_review_count} approving review(s). Currently has ${approvingReviewsCount}.`, 400);
+    }
   }
 
   // Conflict block guard: check if PR has conflicts

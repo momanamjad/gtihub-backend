@@ -15,6 +15,8 @@ const repositorySchema = new mongoose.Schema({
   stars_count: { type: Number, default: 0, min: 0 },
   forks_count: { type: Number, default: 0, min: 0 },
   watchers_count: { type: Number, default: 0, min: 0 },
+  is_fork: { type: Boolean, default: false },
+  forked_from: { type: mongoose.Schema.Types.ObjectId, ref: 'Repository', default: null },
   watchers: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], default: [] },
   issues_count: { type: Number, default: 0, min: 0 },
   url: { type: String, default: "" },

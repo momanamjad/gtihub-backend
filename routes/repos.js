@@ -1,4 +1,7 @@
 import express from 'express';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const archiver = require('archiver');
 import { validateRequest, validateQuery } from '../utils/validate.js';
 import { createRepoValidator, updateRepoValidator, paginationValidator } from '../utils/validators.js';
 import { successResponse, paginatedResponse } from '../utils/responseFormatter.js';
@@ -13,8 +16,10 @@ import WorkflowRun from '../models/workflowRun.js';
 import Secret from '../models/secret.js';
 import FileNode from '../models/fileNode.js';
 import User from '../models/user.js';
+import BranchProtection from '../models/branchProtection.js';
 import { recordContribution } from '../services/userService.js';
 import { triggerWorkflowRun } from '../utils/workflowHelper.js';
+import { dispatchRepoEvent } from '../services/webhookQueue.js';
 
 const IV_LENGTH = 16;
 
@@ -282,6 +287,15 @@ router.get('/search/query', asyncHandler(async (req, res) => {
 router.post('/:id/issues', auth, asyncHandler(async (req, res) => {
   const { title, description, labels } = req.body;
   const issue = await repoService.createIssue(req.params.id, req.user.id, { title, description, labels });
+
+  const repo = await Repository.findById(req.params.id);
+  await dispatchRepoEvent(req.params.id, 'issues', {
+    action: 'opened',
+    issue: issue,
+    repository: repo.toObject(),
+    sender: req.user
+  });
+
   successResponse(res, issue, 'Issue created successfully', 201);
 }));
 
@@ -403,6 +417,83 @@ router.post('/:id/branches', auth, asyncHandler(async (req, res) => {
   successResponse(res, branches, 'Branch created successfully', 201);
 }));
 
+/**
+ * @swagger
+ * /repos/{id}/branches/{branch}/protection:
+ *   get:
+ *     summary: Get branch protection rules
+ *     tags: [Branches]
+ */
+router.get('/:id/branches/:branch/protection', auth, asyncHandler(async (req, res) => {
+  const protection = await BranchProtection.findOne({ 
+    repository: req.params.id, 
+    branch: req.params.branch 
+  });
+  successResponse(res, protection || null);
+}));
+
+/**
+ * @swagger
+ * /repos/{id}/branches/{branch}/protection:
+ *   put:
+ *     summary: Update branch protection rules
+ *     tags: [Branches]
+ */
+router.put('/:id/branches/:branch/protection', auth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.owner.toString() !== req.user.id) {
+    throw new AppError('Unauthorized', 403);
+  }
+
+  const {
+    require_pr_reviews,
+    required_approving_review_count,
+    require_status_checks,
+    strict_status_checks,
+    contexts,
+    enforce_admins,
+    require_linear_history,
+    allow_force_pushes,
+    allow_deletions
+  } = req.body;
+
+  let protection = await BranchProtection.findOne({ repository: repo._id, branch: req.params.branch });
+  
+  if (!protection) {
+    protection = new BranchProtection({ repository: repo._id, branch: req.params.branch });
+  }
+
+  if (require_pr_reviews !== undefined) protection.require_pr_reviews = require_pr_reviews;
+  if (required_approving_review_count !== undefined) protection.required_approving_review_count = required_approving_review_count;
+  if (require_status_checks !== undefined) protection.require_status_checks = require_status_checks;
+  if (strict_status_checks !== undefined) protection.strict_status_checks = strict_status_checks;
+  if (contexts !== undefined) protection.contexts = contexts;
+  if (enforce_admins !== undefined) protection.enforce_admins = enforce_admins;
+  if (require_linear_history !== undefined) protection.require_linear_history = require_linear_history;
+  if (allow_force_pushes !== undefined) protection.allow_force_pushes = allow_force_pushes;
+  if (allow_deletions !== undefined) protection.allow_deletions = allow_deletions;
+
+  await protection.save();
+  successResponse(res, protection, 'Branch protection updated successfully');
+}));
+
+/**
+ * @swagger
+ * /repos/{id}/branches/{branch}/protection:
+ *   delete:
+ *     summary: Delete branch protection rules
+ *     tags: [Branches]
+ */
+router.delete('/:id/branches/:branch/protection', auth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.owner.toString() !== req.user.id) {
+    throw new AppError('Unauthorized', 403);
+  }
+
+  await BranchProtection.findOneAndDelete({ repository: repo._id, branch: req.params.branch });
+  successResponse(res, null, 'Branch protection removed successfully');
+}));
+
 router.get('/:id/tags', optionalAuth, asyncHandler(async (req, res) => {
   const tags = await repoService.getTags(req.params.id, req.user?.id);
   successResponse(res, tags);
@@ -501,38 +592,13 @@ router.get('/:id/actions/runs', optionalAuth, asyncHandler(async (req, res) => {
 
 router.post('/:id/actions/runs', auth, asyncHandler(async (req, res) => {
   const { branch } = req.body;
-  const mockLogs = [
-    "🚀 Starting build environment on runner host UBUNTU-LATEST...",
-    "🔧 Setup Node.js environment version v20.11.0...",
-    "📦 Loading dependency caching layers from cache key: node-modules-v1...",
-    "📥 Executing npm clean-install (npm ci)...",
-    "added 1204 packages in 4.25s",
-    "🧪 Executing unit test suite: npm run test...",
-    "PASS  src/tests/auth.test.js (5.42s)",
-    "PASS  src/tests/repos.test.js (3.11s)",
-    "✔ All unit and integration test runs passed successfully (18 tests)",
-    "🔧 Compiling production asset bundle: npm run build...",
-    "vite v7.3.3 building client environment for production...",
-    "transforming modules...",
-    "✓ 2513 modules transformed.",
-    "✓ production bundle compiled in 11.24s",
-    "🎉 Frontend bundle created successfully!",
-    "🚀 Launching deploy deployment task to edge network host...",
-    "📦 Syncing build assets with remote storage...",
-    "✅ Deployment live: https://github-kappa-two.vercel.app",
-    "🎉 Pipeline workflow run finished successfully with exit status: 0."
-  ];
-
-  const run = new WorkflowRun({
-    repository: req.params.id,
-    name: 'CI/CD Build & Deploy',
-    branch: branch || 'main',
-    status: 'success',
-    logs: mockLogs
-  });
-
-  await run.save();
-  successResponse(res, run, 'Workflow run triggered successfully', 201);
+  const run = await triggerWorkflowRun(req.params.id, branch || 'main');
+  
+  if (!run) {
+    throw new AppError('Failed to trigger workflow run', 500);
+  }
+  
+  successResponse(res, run, 'Workflow triggered successfully', 201);
 }));
 
 // Secrets Management Endpoints
@@ -589,14 +655,74 @@ router.delete('/:id/secrets/:secretId', auth, asyncHandler(async (req, res) => {
   successResponse(res, null, 'Secret deleted successfully');
 }));
 
+// ZIP Download Route
+router.get('/:id/zip', optionalAuth, asyncHandler(async (req, res) => {
+  const repo = await Repository.findById(req.params.id);
+  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  
+  if (repo.visibility === 'private' && (!req.user || repo.owner.toString() !== req.user.id.toString())) {
+    throw new AppError('Unauthorized', 401);
+  }
+
+  const branch = req.query.branch || repo.default_branch || 'main';
+
+  // Find all files in the current branch
+  const files = await FileNode.find({
+    repository: repo._id,
+    branch: branch,
+    type: 'file'
+  });
+
+  if (!files || files.length === 0) {
+    throw new AppError('Repository is empty', 404);
+  }
+
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${repo.name}-${branch}.zip"`);
+
+  const archive = archiver('zip', {
+    zlib: { level: 9 }
+  });
+
+  archive.on('error', function(err) {
+    console.error('Archiver error:', err);
+    res.status(500).send({ error: err.message });
+  });
+
+  // Pipe archive data to the response
+  archive.pipe(res);
+
+  // Append files
+  for (const file of files) {
+    if (file.content) {
+      // Decode base64 content
+      const buffer = Buffer.from(file.content, 'base64');
+      archive.append(buffer, { name: file.path });
+    }
+  }
+
+  await archive.finalize();
+}));
+
 // Bulk Sync Route for CLI Pushing
 router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
   const repo = await Repository.findById(req.params.id);
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
   if (repo.owner.toString() !== req.user.id.toString()) throw new AppError('Unauthorized', 401);
 
-  const { files, commitMessage } = req.body;
+  const { files, commitMessage, branch = 'main', force } = req.body;
   if (!Array.isArray(files)) throw new AppError('Files list must be an array', 400);
+
+  // Branch Protection checks
+  const protection = await BranchProtection.findOne({ repository: repo._id, branch });
+  if (protection) {
+    if (protection.require_pr_reviews) {
+      throw new AppError(`Cannot push directly to ${branch} branch. Branch protection requires a pull request with approving reviews.`, 403);
+    }
+    if (force && !protection.allow_force_pushes) {
+      throw new AppError(`Cannot force push to ${branch} branch. Branch protection forbids force pushes.`, 403);
+    }
+  }
 
   const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
   let newRepoSize = 0;
@@ -704,6 +830,21 @@ router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
   // 5. Trigger automated actions workflow run
   const activeBranch = (files && files.length > 0) ? (files[0].branch || 'main') : 'main';
   await triggerWorkflowRun(req.params.id, activeBranch);
+
+  // 6. Dispatch push webhook
+  await dispatchRepoEvent(req.params.id, 'push', {
+    repository: repo.toObject(),
+    pusher: req.user,
+    ref: `refs/heads/${activeBranch}`,
+    commits: [
+      {
+        id: commitHash,
+        message: commitMsg,
+        timestamp: commitDate,
+        author: { name: authorName }
+      }
+    ]
+  });
 
   successResponse(res, null, 'Repository file tree synced successfully');
 }));

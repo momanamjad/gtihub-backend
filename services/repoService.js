@@ -68,6 +68,57 @@ build/
 `,
 };
 
+export const forkRepository = async (userId, originalRepoId) => {
+  const originalRepo = await Repository.findById(originalRepoId).populate('owner');
+  if (!originalRepo) throw new AppError('Repository not found', 404);
+  if (originalRepo.owner._id.toString() === userId.toString()) {
+    throw new AppError('You cannot fork your own repository', 400);
+  }
+
+  const user = await User.findById(userId);
+  if (!user) throw new AppError('User not found', 404);
+
+  // Check if already forked
+  const existingFork = await Repository.findOne({ owner: userId, forked_from: originalRepo._id });
+  if (existingFork) {
+    return existingFork; // Return existing fork
+  }
+
+  // Create new repo
+  const forkRepo = new Repository({
+    owner: userId,
+    name: originalRepo.name,
+    description: originalRepo.description,
+    language: originalRepo.language,
+    visibility: originalRepo.visibility,
+    is_fork: true,
+    forked_from: originalRepo._id,
+    branches: originalRepo.branches,
+    tags: originalRepo.tags,
+    size: originalRepo.size
+  });
+  await forkRepo.save();
+
+  // Increment fork count on original
+  originalRepo.forks_count += 1;
+  await originalRepo.save();
+
+  // Copy all FileNodes
+  const files = await FileNode.find({ repository: originalRepo._id }).lean();
+  const newFiles = files.map(file => {
+    delete file._id;
+    file.repository = forkRepo._id;
+    return file;
+  });
+  if (newFiles.length > 0) {
+    await FileNode.insertMany(newFiles);
+  }
+
+  // Record contribution
+  await recordContribution(userId, 'fork_repo', { repoId: forkRepo._id, repoName: forkRepo.name });
+  return forkRepo;
+};
+
 export const createRepository = async (userId, repoData) => {
   const user = await User.findById(userId);
   const username = user?.login || 'unknown';
@@ -256,6 +307,7 @@ export const getRepositoryById = async (repoId, viewerId) => {
   const repo = await Repository.findById(repoId)
     .populate('owner', 'login avatar_url followers_count')
     .populate('issues_count')
+    .populate({ path: 'forked_from', populate: { path: 'owner', select: 'login' } })
     .lean();
 
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);

@@ -12,8 +12,9 @@ import http from 'http';
 import { Server } from 'socket.io';
 import { notificationEmitter } from './utils/eventEmitter.js';
 
-// Import Swagger config
 import swaggerDocs from './config/swagger.js';
+import './services/webhookQueue.js'; // Ensure workers start
+import './services/actionsQueue.js'; // Start CI/CD worker
 
 // Import Routes
 import authRoutes from './routes/auth.js';
@@ -28,6 +29,9 @@ import wikiRoutes from './routes/wiki.js';
 import projectRoutes from './routes/projects.js';
 import searchRoutes from './routes/search.js';
 import releaseRoutes from './routes/releases.js';
+import webhookRoutes from './routes/webhooks.js';
+import orgRoutes from './routes/orgs.js';
+import gistsRoutes from './routes/gists.js';
 
 // Import error handling
 import { errorHandler } from './utils/errorHandler.js';
@@ -287,8 +291,15 @@ app.use('/api/mcp', mcpRoutes);
 app.use('/api/copilot', copilotRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/projects', projectRoutes);
+app.use('/api/gists', gistsRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/repos/:repoId/releases', releaseRoutes);
+app.use('/api/repos/:id/webhooks', webhookRoutes);
+app.use('/api/orgs', orgRoutes);
+import packagesRoutes from './routes/packages.js';
+app.use('/api/packages', packagesRoutes);
+
+app.use('/uploads/packages', express.static(path.join(process.cwd(), 'uploads', 'packages')));
 app.get('/uploads/:filename', (req, res) => {
   const safeFilename = path.basename(req.params.filename);
   
