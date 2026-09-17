@@ -263,7 +263,7 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
     throw new AppError('Google credential token is required', 400);
   }
 
-  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientId = process.env.GOOGLE_CLIENT_ID || '449332130013-6jrl1ke3f7l3o3fdd26oqgckndceq2cf.apps.googleusercontent.com';
   if (!clientId) {
     throw new AppError('Google Sign-In is not configured on this server', 503);
   }

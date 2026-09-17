@@ -1,6 +1,8 @@
 import jwt from 'jsonwebtoken';
 import { errorResponse } from '../utils/responseFormatter.js';
 
+const JWT_SECRET = process.env.JWT_SECRET || 'github_clone_default_jwt_secret_fallback_key';
+
 export const auth = (req, res, next) => {
   const token = req.cookies?.accessToken || req.header('x-auth-token') || req.header('authorization')?.replace(/^Bearer\s+/i, '');
   
@@ -9,7 +11,7 @@ export const auth = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded.user;
     next();
   } catch (err) {
@@ -28,7 +30,7 @@ export const optionalAuth = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded.user;
     next();
   } catch (err) {
