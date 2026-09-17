@@ -13,8 +13,11 @@ import { Server } from 'socket.io';
 import { notificationEmitter } from './utils/eventEmitter.js';
 
 import swaggerDocs from './config/swagger.js';
-import './services/webhookQueue.js'; // Ensure workers start
-import './services/actionsQueue.js'; // Start CI/CD worker
+// Start queue workers only in non-serverless standalone server
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+  import('./services/webhookQueue.js').catch(() => {});
+  import('./services/actionsQueue.js').catch(() => {});
+}
 
 // Import Routes
 import authRoutes from './routes/auth.js';
