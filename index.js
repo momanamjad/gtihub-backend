@@ -13,8 +13,11 @@ import { Server } from 'socket.io';
 import { notificationEmitter } from './utils/eventEmitter.js';
 
 import swaggerDocs from './config/swagger.js';
-import './services/webhookQueue.js'; // Ensure workers start
-import './services/actionsQueue.js'; // Start CI/CD worker
+// Start queue workers only in non-serverless standalone server
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+  import('./services/webhookQueue.js').catch(() => {});
+  import('./services/actionsQueue.js').catch(() => {});
+}
 
 // Import Routes
 import authRoutes from './routes/auth.js';
@@ -129,6 +132,7 @@ app.use((req, res, next) => {
         scriptSrc: ["'self'", `'nonce-${res.locals.nonce}'`]
       }
     },
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     crossOriginResourcePolicy: { policy: "cross-origin" }
   })(req, res, next);
 });
@@ -167,8 +171,25 @@ app.use(express.urlencoded({ limit: '1mb', extended: true }));
 // Disable query buffering so that we don't hang for 10s if the connection fails or isn't ready
 mongoose.set('bufferCommands', false);
 
+// Health Check Route (before connectDB to prevent blocking)
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Server is running' });
+});
+
+// API Welcome Route
+app.get('/', (req, res) => res.json({ 
+  message: 'GitHub Clone API is running!',
+  docs: '/api/docs',
+  version: '1.0.0',
+}));
+
 // Database Connection Middleware for Serverless/Vercel
 const connectDB = async (req, res, next) => {
+  // Pre-flight OPTIONS and health checks do not need DB connection
+  if (req.method === 'OPTIONS' || req.path === '/health' || req.path === '/') {
+    return next();
+  }
+
   // If already connected, proceed
   if (mongoose.connection.readyState === 1) {
     return next();
@@ -256,20 +277,7 @@ app.get('/api/docs/swagger-ui-bundle.js', (req, res) => {
   res.send(swaggerUi.JS);
 });
 
-// Health Check Route
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Server is running' });
-});
-
-
-
 // API Routes
-app.get('/', (req, res) => res.json({ 
-  message: 'GitHub Clone API is running!',
-  docs: '/api/docs',
-  version: '1.0.0',
-}));
-
 app.use('/api/auth', authRoutes);
 app.use('/api/repos', repoRoutes);
 app.use('/api/repos/:repoId/pulls', pullRoutes);
@@ -343,7 +351,9 @@ process.on('unhandledRejection', (reason, promise) => {
 
 process.on('uncaughtException', (err) => {
   console.error('🚨 Uncaught Exception thrown:', err);
-  process.exit(1);
+  if (!process.env.VERCEL) {
+    process.exit(1);
+  }
 });
 
 export default app;

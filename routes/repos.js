@@ -1,7 +1,4 @@
 import express from 'express';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const archiver = require('archiver');
 import { validateRequest, validateQuery } from '../utils/validate.js';
 import { createRepoValidator, updateRepoValidator, paginationValidator } from '../utils/validators.js';
 import { successResponse, paginatedResponse } from '../utils/responseFormatter.js';
@@ -679,6 +676,9 @@ router.get('/:id/zip', optionalAuth, asyncHandler(async (req, res) => {
 
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${repo.name}-${branch}.zip"`);
+
+  const archiverModule = await import('archiver');
+  const archiver = archiverModule.default || archiverModule;
 
   const archive = archiver('zip', {
     zlib: { level: 9 }
