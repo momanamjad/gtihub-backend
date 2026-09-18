@@ -30,5 +30,6 @@ const userSchema = new mongoose.Schema({
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 userSchema.index({ login: 'text', name: 'text' });
+userSchema.index({ email: 1 }, { sparse: true });
 
 export default mongoose.model('User', userSchema);

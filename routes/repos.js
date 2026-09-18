@@ -14,7 +14,7 @@ import Secret from '../models/secret.js';
 import FileNode from '../models/fileNode.js';
 import User from '../models/user.js';
 import BranchProtection from '../models/branchProtection.js';
-import { recordContribution } from '../services/userService.js';
+import { recordContribution, clearUserProfileCache } from '../services/userService.js';
 import { triggerWorkflowRun } from '../utils/workflowHelper.js';
 import { dispatchRepoEvent } from '../services/webhookQueue.js';
 
@@ -61,6 +61,7 @@ router.post('/', auth, validateRequest(createRepoValidator), asyncHandler(async 
   // Note: profile README detection (name === login) is handled in repoService.createRepository
   // which has access to the real user.login from DB. The JWT only contains { id }.
   const repo = await repoService.createRepository(req.user.id, req.validated);
+  clearUserProfileCache();
   successResponse(res, repo, 'Repository created successfully', 201);
 }));
 

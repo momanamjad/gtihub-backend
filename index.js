@@ -100,11 +100,14 @@ app.options(/.*/, cors({
 // Gzip compression — must be before routes
 app.use(compression({ level: 6, threshold: 1024 }));
 
-// Cache-Control for GET API responses (30s stale-while-revalidate for public, none for private/auth)
+// Cache-Control for GET API responses (public profiles & GET routes cached with stale-while-revalidate)
 app.use('/api/', (req, res, next) => {
   if (req.method === 'GET') {
-    // Auth and profile routes should not be cached
-    if (req.path.startsWith('/auth/') || req.path.includes('/profile') || req.path.includes('/users/me')) {
+    // Public user profile GET /api/auth/user/:username can be cached briefly (15s edge, 60s swr)
+    if (req.path.match(/^\/auth\/user\/[^\/]+$/)) {
+      res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+    } else if (req.path.startsWith('/auth/') || req.path.includes('/profile') || req.path.includes('/users/me')) {
+      // Private auth and self-profile routes should not be cached
       res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     } else {
       res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
@@ -184,13 +187,18 @@ app.get('/', (req, res) => res.json({
 }));
 
 // Database Connection Middleware for Serverless/Vercel
+let cachedMongoose = global._mongooseConn;
+if (!cachedMongoose) {
+  cachedMongoose = global._mongooseConn = { conn: null, promise: null };
+}
+
 const connectDB = async (req, res, next) => {
   // Pre-flight OPTIONS and health checks do not need DB connection
   if (req.method === 'OPTIONS' || req.path === '/health' || req.path === '/') {
     return next();
   }
 
-  // If already connected, proceed
+  // If already connected, proceed immediately
   if (mongoose.connection.readyState === 1) {
     return next();
   }
@@ -208,34 +216,24 @@ const connectDB = async (req, res, next) => {
   }
 
   try {
-    if (mongoose.connection.readyState === 2) {
-      await new Promise((resolve, reject) => {
-        let retries = 0;
-        const maxRetries = 20; // 10 seconds at 500ms intervals
-        const interval = setInterval(() => {
-          retries++;
-          if (mongoose.connection.readyState === 1) {
-            clearInterval(interval);
-            resolve();
-          } else if (retries >= maxRetries) {
-            clearInterval(interval);
-            reject(new Error('MongoDB connection timeout'));
-          }
-        }, 500);
+    if (!cachedMongoose.promise) {
+      console.log('🔄 Connecting to MongoDB...');
+      cachedMongoose.promise = mongoose.connect(dbUri, {
+        maxPoolSize: 10,
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+      }).then((m) => {
+        console.log('✅ Connected to MongoDB');
+        return m;
+      }).catch((err) => {
+        cachedMongoose.promise = null;
+        throw err;
       });
-      return next();
     }
-
-    // Otherwise, connect
-    console.log('🔄 Connecting to MongoDB...');
-    await mongoose.connect(dbUri, {
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000
-    });
-    console.log('✅ Connected to MongoDB');
+    await cachedMongoose.promise;
     next();
   } catch (err) {
+    cachedMongoose.promise = null;
     console.error('❌ Database Connection Error:', err.message);
     res.status(500).json({
       success: false,

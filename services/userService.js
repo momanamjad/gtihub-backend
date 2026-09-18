@@ -23,7 +23,30 @@ export const recordContribution = async (userId, type, repositoryId = null, extr
   }
 };
 
+// In-memory cache for public user profiles (30 seconds TTL)
+const profileCache = new Map();
+const PROFILE_CACHE_TTL = 30 * 1000;
+
+export const clearUserProfileCache = (username) => {
+  if (username) {
+    const prefix = `${username.toLowerCase()}:`;
+    for (const key of profileCache.keys()) {
+      if (key.startsWith(prefix)) {
+        profileCache.delete(key);
+      }
+    }
+  } else {
+    profileCache.clear();
+  }
+};
+
 export const getUserPublicProfile = async (username, viewerId) => {
+  const cacheKey = `${username.toLowerCase()}:${viewerId || 'anon'}`;
+  const cached = profileCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp < PROFILE_CACHE_TTL)) {
+    return cached.data;
+  }
+
   const user = await User.findOne({ login: username }).select('-password').lean();
   if (!user) throw new AppError('User not found', 404);
 
@@ -137,7 +160,9 @@ export const getUserPublicProfile = async (username, viewerId) => {
   userObj.profileReadmeContent = profileReadmeContent;
   // ───────────────────────────────────────────────────────────────────────────
 
-  return { user: userObj, repos, pins, starredRepos };
+  const result = { user: userObj, repos, pins, starredRepos };
+  profileCache.set(cacheKey, { data: result, timestamp: Date.now() });
+  return result;
 };
 
 export const updateProfile = async (userId, updates) => {
@@ -152,6 +177,7 @@ export const updateProfile = async (userId, updates) => {
   });
 
   await user.save();
+  clearUserProfileCache(user.login);
   return user;
 };
 
