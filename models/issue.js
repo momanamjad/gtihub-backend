@@ -15,6 +15,8 @@ const issueSchema = new mongoose.Schema({
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 issueSchema.index({ repository: 1, state: 1 });
+issueSchema.index({ repository: 1, is_deleted: 1, state: 1 });
+issueSchema.index({ repository: 1, number: 1 });
 issueSchema.index({ creator: 1 });
 
 export default mongoose.model('Issue', issueSchema);
