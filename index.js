@@ -295,25 +295,15 @@ import packagesRoutes from './routes/packages.js';
 app.use('/api/packages', packagesRoutes);
 
 app.use('/uploads/packages', express.static(path.join(process.cwd(), 'uploads', 'packages')));
-app.get('/uploads/:filename', (req, res) => {
-  const safeFilename = path.basename(req.params.filename);
-  
-  const uploadDir = process.env.VERCEL 
-    ? '/tmp'
-    : path.resolve('public/uploads');
-    
-  const filePath = path.resolve(uploadDir, safeFilename);
-  
-  // Verify that the resolved path is inside the upload directory
-  if (!filePath.startsWith(path.resolve(uploadDir))) {
-    return res.status(400).json({ success: false, message: 'Invalid file path' });
-  }
 
-  res.sendFile(filePath, (err) => {
-    if (err) {
-      res.status(404).json({ success: false, message: 'Image not found' });
-    }
-  });
+// Serve uploaded files via express's well-audited static file middleware instead of
+// hand-rolled path arithmetic, which removes the unreliable custom traversal check entirely.
+const uploadsDir = process.env.VERCEL
+  ? '/tmp'
+  : path.resolve('public/uploads');
+app.use('/uploads', express.static(uploadsDir, { fallthrough: false }));
+app.use('/uploads', (err, req, res, next) => {
+  res.status(404).json({ success: false, message: 'Image not found' });
 });
 
 // 404 Handler
