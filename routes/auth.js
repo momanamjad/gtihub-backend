@@ -304,8 +304,7 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
 
     // Generate a secure random password for DB requirement
     const randomPassword = crypto.randomBytes(32).toString('hex');
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(randomPassword, salt);
+    const hashedPassword = await bcrypt.hash(randomPassword, 10); // pass rounds directly, skip genSalt
 
     user = new User({
       login,
