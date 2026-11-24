@@ -33,14 +33,15 @@ export const register = async ({ login, email, password }) => {
   let user = await User.findOne({ $or: [{ email }, { login }] });
   if (user) throw new AppError('User already exists', 400);
 
+  // Create user first to get _id, then hash and save once
   user = new User({ login, email, password });
-  const salt = await bcrypt.genSalt(10);
-  user.password = await bcrypt.hash(password, salt);
-  await user.save();
+  const hashedPassword = await bcrypt.hash(password, 10); // skip genSalt — pass rounds directly
+  user.password = hashedPassword;
 
-  const { accessToken, refreshToken } = generateTokens(user.id);
+  const { accessToken, refreshToken } = generateTokens(user._id.toString());
   user.refreshToken = refreshToken;
-  await user.save();
+
+  await user.save(); // single save (was two saves before)
 
   const userObj = user.toObject();
   delete userObj.password;
@@ -59,21 +60,28 @@ export const login = async ({ email, password }) => {
 
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) {
-    user.loginAttempts = (user.loginAttempts || 0) + 1;
-    if (user.loginAttempts >= 5) {
-      user.lockUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes lockout
-      user.loginAttempts = 0; // reset attempts
+    // Use targeted update to avoid full-document save overhead
+    const newAttempts = (user.loginAttempts || 0) + 1;
+    if (newAttempts >= 5) {
+      await User.findByIdAndUpdate(user._id, {
+        loginAttempts: 0,
+        lockUntil: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes lockout
+      });
+    } else {
+      await User.findByIdAndUpdate(user._id, { loginAttempts: newAttempts });
     }
-    await user.save();
     throw new AppError('Invalid Credentials', 400);
   }
 
   const { accessToken, refreshToken } = generateTokens(user.id);
-  user.refreshToken = refreshToken;
-  user.loginAttempts = 0;
-  user.lockUntil = undefined;
-  await user.save();
-  
+
+  // Use targeted update instead of full user.save() — avoids Mongoose full-doc validation overhead
+  await User.findByIdAndUpdate(user._id, {
+    refreshToken,
+    loginAttempts: 0,
+    $unset: { lockUntil: 1 },
+  });
+
   const userObj = user.toObject();
   delete userObj.password;
   return { accessToken, refreshToken, user: userObj };
@@ -86,8 +94,7 @@ export const changePassword = async (userId, { oldPassword, newPassword }) => {
   const isMatch = await bcrypt.compare(oldPassword, user.password);
   if (!isMatch) throw new AppError('Invalid current password', 400);
 
-  const salt = await bcrypt.genSalt(10);
-  user.password = await bcrypt.hash(newPassword, salt);
+  user.password = await bcrypt.hash(newPassword, 10); // skip genSalt
   await user.save();
 
   return { message: 'Password updated successfully' };
