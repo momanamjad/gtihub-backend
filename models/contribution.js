@@ -27,5 +27,6 @@ const contributionSchema = new mongoose.Schema({
 
 // Add index on user and created_at for fast aggregation queries
 contributionSchema.index({ user: 1, created_at: -1 });
+contributionSchema.index({ repository: 1, type: 1, created_at: -1 });
 
 export default mongoose.model('Contribution', contributionSchema);

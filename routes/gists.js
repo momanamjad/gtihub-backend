@@ -12,14 +12,15 @@ router.get('/public', optionalAuth, asyncHandler(async (req, res) => {
   const { page = 1, limit = 10 } = req.query;
   const skip = (page - 1) * limit;
 
-  const gists = await Gist.find({ public: true })
-    .populate('owner', 'login avatar_url')
-    .sort('-created_at')
-    .skip(skip)
-    .limit(limit)
-    .lean();
-    
-  const total = await Gist.countDocuments({ public: true });
+  const [gists, total] = await Promise.all([
+    Gist.find({ public: true })
+      .populate('owner', 'login avatar_url')
+      .sort('-created_at')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Gist.countDocuments({ public: true })
+  ]);
   paginatedResponse(res, gists, page, limit, total);
 }));
 
@@ -28,14 +29,15 @@ router.get('/user', auth, asyncHandler(async (req, res) => {
   const { page = 1, limit = 10 } = req.query;
   const skip = (page - 1) * limit;
 
-  const gists = await Gist.find({ owner: req.user.id })
-    .populate('owner', 'login avatar_url')
-    .sort('-created_at')
-    .skip(skip)
-    .limit(limit)
-    .lean();
-    
-  const total = await Gist.countDocuments({ owner: req.user.id });
+  const [gists, total] = await Promise.all([
+    Gist.find({ owner: req.user.id })
+      .populate('owner', 'login avatar_url')
+      .sort('-created_at')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Gist.countDocuments({ owner: req.user.id })
+  ]);
   paginatedResponse(res, gists, page, limit, total);
 }));
 

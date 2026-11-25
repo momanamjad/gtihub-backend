@@ -33,6 +33,8 @@ pullRequestSchema.pre('save', function() {
 });
 
 pullRequestSchema.index({ repository: 1, status: 1 });
+pullRequestSchema.index({ repository: 1, created_at: -1 });
+pullRequestSchema.index({ repository: 1, number: 1 });
 pullRequestSchema.index({ author: 1 });
 
 export default mongoose.model('PullRequest', pullRequestSchema);

@@ -8,5 +8,6 @@ const orgMemberSchema = new mongoose.Schema({
 
 // A user can only have one membership per org
 orgMemberSchema.index({ organization: 1, user: 1 }, { unique: true });
+orgMemberSchema.index({ user: 1 });
 
 export default mongoose.model('OrgMember', orgMemberSchema);

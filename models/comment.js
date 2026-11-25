@@ -7,4 +7,7 @@ const commentSchema = new mongoose.Schema({
   pullRequest: { type: mongoose.Schema.Types.ObjectId, ref: 'PullRequest' },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
+commentSchema.index({ issue: 1, created_at: 1 });
+commentSchema.index({ pullRequest: 1, created_at: 1 });
+
 export default mongoose.model('Comment', commentSchema);
