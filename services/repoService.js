@@ -290,15 +290,16 @@ export const getPublicRepositories = async ({ page = 1, limit = 10, sort = '-cre
   
   if (language) query.language = language;
 
-  const repos = await Repository.find(query)
-    .select('-fileTree -branches -tags')
-    .populate('owner', 'login avatar_url')
-    .sort(sort)
-    .skip(skip)
-    .limit(limit)
-    .lean();
-
-  const total = await Repository.countDocuments(query);
+  const [repos, total] = await Promise.all([
+    Repository.find(query)
+      .select('-fileTree -branches -tags')
+      .populate('owner', 'login avatar_url')
+      .sort(sort)
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Repository.countDocuments(query)
+  ]);
 
   return { repos, total };
 };

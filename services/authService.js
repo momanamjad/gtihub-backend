@@ -101,7 +101,7 @@ export const changePassword = async (userId, { oldPassword, newPassword }) => {
 };
 
 export const getUserProfile = async (userId) => {
-  const user = await User.findById(userId).select('-password');
+  const user = await User.findById(userId).select('-password').lean();
   if (!user) throw new AppError('User not found', 404);
   return user;
 };

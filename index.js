@@ -220,13 +220,17 @@ const connectDB = async (req, res, next) => {
       console.log('🔄 Connecting to MongoDB...');
       cachedMongoose.promise = mongoose.connect(dbUri, {
         maxPoolSize: 10,
+        minPoolSize: 1,
+        family: 4,
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 45000,
       }).then((m) => {
         console.log('✅ Connected to MongoDB');
+        cachedMongoose.conn = m;
         return m;
       }).catch((err) => {
         cachedMongoose.promise = null;
+        cachedMongoose.conn = null;
         throw err;
       });
     }
