@@ -84,18 +84,23 @@ router.get('/', optionalAuth, asyncHandler(async (req, res) => {
       if (filters.language) {
         repoQuery.language = { $regex: escapeRegex(filters.language), $options: 'i' };
       }
-      if (filters.visibility) {
-        repoQuery.visibility = filters.visibility;
-      } else {
-        const viewerId = req.user?.id;
+      const viewerId = req.user?.id;
+      if (filters.visibility === 'private') {
         if (viewerId) {
-          repoQuery.$or = [
-            { visibility: 'public' },
-            { owner: viewerId }
-          ];
+          repoQuery.visibility = 'private';
+          repoQuery.owner = viewerId;
         } else {
-          repoQuery.visibility = 'public';
+          repoQuery._id = null;
         }
+      } else if (filters.visibility === 'public') {
+        repoQuery.visibility = 'public';
+      } else if (viewerId) {
+        repoQuery.$or = [
+          { visibility: 'public' },
+          { owner: viewerId }
+        ];
+      } else {
+        repoQuery.visibility = 'public';
       }
 
       const [repos, count] = await Promise.all([

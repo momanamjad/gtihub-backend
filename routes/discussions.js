@@ -4,6 +4,7 @@ import Repository from '../models/repository.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
 import { successResponse, errorResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
+import { assertRepoAccess } from '../utils/repoAccess.js';
 
 const router = express.Router({ mergeParams: true });
 
@@ -12,8 +13,7 @@ router.get('/', optionalAuth, asyncHandler(async (req, res) => {
   const { repoId } = req.params;
   const { category } = req.query;
 
-  const repo = await Repository.findById(repoId);
-  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  await assertRepoAccess(repoId, req.user?.id);
 
   const query = { repository: repoId };
   if (category) query.category = category;
@@ -21,7 +21,8 @@ router.get('/', optionalAuth, asyncHandler(async (req, res) => {
   const discussions = await Discussion.find(query)
     .populate('creator', 'login avatar_url')
     .populate('replies.author', 'login avatar_url')
-    .sort('-createdAt');
+    .sort('-created_at')
+    .lean();
 
   successResponse(res, discussions);
 }));
@@ -31,13 +32,12 @@ router.post('/', auth, asyncHandler(async (req, res) => {
   const { repoId } = req.params;
   const { title, body, category } = req.body;
 
-  if (!title?.trim()) return res.status(400).json({ message: 'Title is required' });
-  if (!body?.trim()) return res.status(400).json({ message: 'Body is required' });
-  if (title.length > 256) return res.status(400).json({ message: 'Title too long' });
-  if (body.length > 65536) return res.status(400).json({ message: 'Body too long' });
+  if (!title?.trim()) throw new AppError('Title is required', 400);
+  if (!body?.trim()) throw new AppError('Body is required', 400);
+  if (title.length > 256) throw new AppError('Title too long', 400);
+  if (body.length > 65536) throw new AppError('Body too long', 400);
 
-  const repo = await Repository.findById(repoId);
-  if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
+  await assertRepoAccess(repoId, req.user.id);
 
   const discussion = new Discussion({
     repository: repoId,

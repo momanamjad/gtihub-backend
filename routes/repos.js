@@ -3,6 +3,7 @@ import { validateRequest, validateQuery } from '../utils/validate.js';
 import { createRepoValidator, updateRepoValidator, paginationValidator } from '../utils/validators.js';
 import { successResponse, paginatedResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
+import { assertRepoAccess } from '../utils/repoAccess.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
 import * as repoService from '../services/repoService.js';
 import crypto from 'crypto';
@@ -354,6 +355,7 @@ router.delete('/:id/contents', auth, asyncHandler(async (req, res) => {
 }));
 
 router.get('/:id/compare', optionalAuth, asyncHandler(async (req, res) => {
+  await assertRepoAccess(req.params.id, req.user?.id);
   const { base, head } = req.query;
   const diffs = await repoService.compareBranches(req.params.id, head || 'main', base || 'main');
   successResponse(res, diffs);
@@ -505,14 +507,17 @@ router.post('/:id/tags', auth, asyncHandler(async (req, res) => {
 
 // GET comments for an issue
 router.get('/:id/issues/:issueId/comments', optionalAuth, asyncHandler(async (req, res) => {
+  await assertRepoAccess(req.params.id, req.user?.id);
   const comments = await Comment.find({ issue: req.params.issueId })
     .populate('author', 'login avatar_url')
-    .sort('createdAt');
+    .sort('created_at')
+    .lean();
   successResponse(res, comments);
 }));
 
 // POST a new comment on an issue
 router.post('/:id/issues/:issueId/comments', auth, asyncHandler(async (req, res) => {
+  await assertRepoAccess(req.params.id, req.user.id);
   const { body } = req.body;
   if (!body) throw new AppError('Comment body is required', 400);
 
@@ -522,20 +527,26 @@ router.post('/:id/issues/:issueId/comments', auth, asyncHandler(async (req, res)
     issue: req.params.issueId
   });
 
-  await comment.save();
+  await Promise.all([
+    comment.save(),
+    Issue.findByIdAndUpdate(req.params.issueId, { $inc: { comments_count: 1 } })
+  ]);
   await comment.populate('author', 'login avatar_url');
   successResponse(res, comment, 'Comment posted successfully', 201);
 }));
 
 // Projects Board Endpoints
 router.get('/:id/projects', optionalAuth, asyncHandler(async (req, res) => {
+  await assertRepoAccess(req.params.id, req.user?.id);
   const cards = await ProjectCard.find({ repository: req.params.id })
     .populate('creator', 'login name avatar_url')
-    .sort('createdAt');
+    .sort('created_at')
+    .lean();
   successResponse(res, cards);
 }));
 
 router.post('/:id/projects', auth, asyncHandler(async (req, res) => {
+  await assertRepoAccess(req.params.id, req.user.id, { requireOwner: true });
   const { title, description, column } = req.body;
   if (!title) throw new AppError('Title is required', 400);
 
@@ -583,12 +594,15 @@ router.delete('/:id/projects/cards/:cardId', auth, asyncHandler(async (req, res)
 
 // Actions (Workflow Runs) Endpoints
 router.get('/:id/actions/runs', optionalAuth, asyncHandler(async (req, res) => {
+  await assertRepoAccess(req.params.id, req.user?.id);
   const runs = await WorkflowRun.find({ repository: req.params.id })
-    .sort('-createdAt');
+    .sort('-created_at')
+    .lean();
   successResponse(res, runs);
 }));
 
 router.post('/:id/actions/runs', auth, asyncHandler(async (req, res) => {
+  await assertRepoAccess(req.params.id, req.user.id, { requireOwner: true });
   const { branch } = req.body;
   const run = await triggerWorkflowRun(req.params.id, branch || 'main');
   
@@ -646,10 +660,9 @@ router.delete('/:id/secrets/:secretId', auth, asyncHandler(async (req, res) => {
   if (!repo || repo.is_deleted) throw new AppError('Repository not found', 404);
   if (repo.owner.toString() !== req.user.id.toString()) throw new AppError('Unauthorized', 401);
 
-  const secret = await Secret.findById(req.params.secretId);
+  const secret = await Secret.findOneAndDelete({ _id: req.params.secretId, repository: req.params.id });
   if (!secret) throw new AppError('Secret not found', 404);
 
-  await Secret.deleteOne({ _id: req.params.secretId });
   successResponse(res, null, 'Secret deleted successfully');
 }));
 
@@ -693,11 +706,10 @@ router.get('/:id/zip', optionalAuth, asyncHandler(async (req, res) => {
   // Pipe archive data to the response
   archive.pipe(res);
 
-  // Append files
+  // Append files (stored as UTF-8 text)
   for (const file of files) {
     if (file.content) {
-      // Decode base64 content
-      const buffer = Buffer.from(file.content, 'base64');
+      const buffer = Buffer.from(file.content, 'utf8');
       archive.append(buffer, { name: file.path });
     }
   }
@@ -761,8 +773,8 @@ router.post('/:id/sync', auth, asyncHandler(async (req, res) => {
   const crypto = await import('crypto');
   const commitHash = crypto.randomBytes(20).toString('hex');
 
-  // 1. Delete all current file nodes
-  await FileNode.deleteMany({ repository: req.params.id });
+  // 1. Delete current file nodes for the target branch only
+  await FileNode.deleteMany({ repository: req.params.id, branch });
 
   // 2. Insert new file nodes
   const formattedNodes = files.map(file => ({

@@ -20,7 +20,8 @@ router.get('/', optionalAuth, asyncHandler(async (req, res) => {
 
   const releases = await Release.find({ repository: repoId })
     .populate('author', 'login avatar_url')
-    .sort('-createdAt');
+    .sort('-created_at')
+    .lean();
 
   successResponse(res, releases);
 }));

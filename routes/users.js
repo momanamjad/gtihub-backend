@@ -136,7 +136,7 @@ router.get('/notifications', auth, validateQuery(paginationValidator), asyncHand
  */
 
 router.get('/pulls', auth, asyncHandler(async (req, res) => {
-  const userRepos = await Repository.find({ owner: req.user.id, is_deleted: false });
+  const userRepos = await Repository.find({ owner: req.user.id, is_deleted: false }).select('_id').lean();
   const repoIds = userRepos.map(r => r._id);
   
   const prs = await PullRequest.find({
@@ -151,7 +151,8 @@ router.get('/pulls', auth, asyncHandler(async (req, res) => {
     select: 'name owner',
     populate: { path: 'owner', select: 'login' }
   })
-  .sort('-createdAt');
+  .sort('-created_at')
+  .lean();
   
   successResponse(res, prs);
 }));
