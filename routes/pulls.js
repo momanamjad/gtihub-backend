@@ -11,6 +11,7 @@ import Comment from '../models/comment.js';
 import { triggerWorkflowRun } from '../utils/workflowHelper.js';
 import FileNode from '../models/fileNode.js';
 import { checkBranchesForConflicts, generateConflictContent } from '../utils/conflictHelper.js';
+import { assertRepoAccess } from '../utils/repoAccess.js';
 
 const router = express.Router({ mergeParams: true });
 
@@ -27,7 +28,8 @@ router.get('/', optionalAuth, asyncHandler(async (req, res) => {
 
   const pr = await PullRequest.find({ repository: repoId })
     .populate('author', 'login avatar_url')
-    .sort('-createdAt');
+    .sort('-created_at')
+    .lean();
   
   successResponse(res, pr);
 }));
@@ -331,10 +333,11 @@ router.get('/:id/reviews', optionalAuth, asyncHandler(async (req, res) => {
 
 // GET conflicted files and their contents with markers
 router.get('/:id/conflicts', auth, asyncHandler(async (req, res) => {
-  const pr = await PullRequest.findById(req.params.id);
-  if (!pr) throw new AppError('Pull Request not found', 404);
-
   const { repoId } = req.params;
+  await assertRepoAccess(repoId, req.user.id);
+
+  const pr = await PullRequest.findOne({ _id: req.params.id, repository: repoId });
+  if (!pr) throw new AppError('Pull Request not found', 404);
   const buildQuery = (branchName, filePath) => {
     const query = { repository: repoId, path: filePath, type: 'file' };
     if (branchName === 'main') {
@@ -374,11 +377,17 @@ router.get('/:id/conflicts', auth, asyncHandler(async (req, res) => {
 
 // POST resolve conflicts and commit to source branch
 router.post('/:id/resolve', auth, asyncHandler(async (req, res) => {
-  const pr = await PullRequest.findById(req.params.id);
-  if (!pr) throw new AppError('Pull Request not found', 404);
-  if (pr.status !== 'open') throw new AppError('Pull Request is already ' + pr.status, 400);
-
   const { repoId } = req.params;
+  const repo = await assertRepoAccess(repoId, req.user.id);
+
+  const pr = await PullRequest.findOne({ _id: req.params.id, repository: repoId });
+  if (!pr) throw new AppError('Pull Request not found', 404);
+  const isOwner = repo.owner.toString() === req.user.id.toString();
+  const isAuthor = pr.author?.toString() === req.user.id.toString();
+  if (!isOwner && !isAuthor) {
+    throw new AppError('Unauthorized to resolve conflicts on this pull request', 403);
+  }
+  if (pr.status !== 'open') throw new AppError('Pull Request is already ' + pr.status, 400);
   const { resolvedFiles } = req.body; // e.g. { "src/App.jsx": "resolved code..." }
 
   if (!resolvedFiles || typeof resolvedFiles !== 'object') {

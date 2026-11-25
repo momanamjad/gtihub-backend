@@ -447,12 +447,12 @@ export const searchRepositories = async ({ q, page = 1, limit = 10, language = n
     query.language = new RegExp('^' + escapeRegex(language) + '$', 'i');
   }
 
-  // Parse visibility:Visibility
+  // Parse visibility:Visibility (unauthenticated search may only filter public repos)
   const visMatch = searchString.match(/visibility:([^\s]+)/);
   if (visMatch) {
     const vis = visMatch[1].toLowerCase();
-    if (vis === 'public' || vis === 'private') {
-      query.visibility = vis;
+    if (vis === 'public') {
+      query.visibility = 'public';
     }
     searchString = searchString.replace(/visibility:[^\s]+/, '').trim();
   }

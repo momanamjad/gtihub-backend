@@ -3,14 +3,15 @@ import jwt from 'jsonwebtoken';
 import User from '../models/user.js';
 import { AppError } from '../utils/errorHandler.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'github_clone_default_jwt_secret_fallback_key';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'github_clone_default_jwt_refresh_secret_fallback_key';
+const JWT_SECRET = process.env.JWT_SECRET || (
+  process.env.NODE_ENV === 'test' ? 'github_clone_test_jwt_secret' : undefined
+);
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || (
+  process.env.NODE_ENV === 'test' ? 'github_clone_test_jwt_refresh_secret' : undefined
+);
 
-if (!process.env.JWT_SECRET) {
-  console.warn('⚠️ WARNING: JWT_SECRET must be set in environment variables. Using fallback secret.');
-}
-if (!process.env.JWT_REFRESH_SECRET) {
-  console.warn('⚠️ WARNING: JWT_REFRESH_SECRET must be set in environment variables. Using fallback secret.');
+if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
+  throw new Error('FATAL: JWT_SECRET and JWT_REFRESH_SECRET environment variables must be set.');
 }
 
 export const generateTokens = (userId) => {
