@@ -3,8 +3,6 @@ import User from '../models/user.js';
 import OrgMember from '../models/orgMember.js';
 import Team from '../models/team.js';
 import TeamMember from '../models/teamMember.js';
-import Repository from '../models/repository.js';
-import TeamRepo from '../models/teamRepo.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
 import { successResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';

@@ -3,7 +3,6 @@ import { auth, optionalAuth } from '../middleware/auth.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
 import { successResponse, paginatedResponse } from '../utils/responseFormatter.js';
 import Gist from '../models/gist.js';
-import User from '../models/user.js';
 
 const router = express.Router();
 
