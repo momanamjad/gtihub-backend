@@ -4,7 +4,6 @@ import Docker from 'dockerode';
 import * as jsyaml from 'js-yaml';
 import WorkflowRun from '../models/workflowRun.js';
 import FileNode from '../models/fileNode.js';
-import Repository from '../models/repository.js';
 import { notificationEmitter } from '../utils/eventEmitter.js'; // to broadcast WebSocket logs
 
 const isVercel = !!process.env.VERCEL;

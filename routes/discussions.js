@@ -2,7 +2,7 @@ import express from 'express';
 import Discussion from '../models/discussion.js';
 import Repository from '../models/repository.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
-import { successResponse, errorResponse } from '../utils/responseFormatter.js';
+import { successResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
 import { assertRepoAccess } from '../utils/repoAccess.js';
 
@@ -61,7 +61,7 @@ router.post('/:id/upvote', auth, asyncHandler(async (req, res) => {
 
   const hasVoted = discussion.upvotes.includes(userId);
   const op = hasVoted ? { $pull: { upvotes: userId } } : { $addToSet: { upvotes: userId } };
-  
+
   const updatedDiscussion = await Discussion.findByIdAndUpdate(id, op, { new: true });
   successResponse(res, updatedDiscussion, hasVoted ? 'Upvote removed' : 'Upvoted');
 }));
@@ -82,7 +82,7 @@ router.post('/:id/replies', auth, asyncHandler(async (req, res) => {
   });
 
   await discussion.save();
-  
+
   const updated = await Discussion.findById(id)
     .populate('creator', 'login avatar_url')
     .populate('replies.author', 'login avatar_url');
@@ -99,7 +99,7 @@ router.put('/:id/replies/:replyId/answer', auth, asyncHandler(async (req, res) =
 
   const discussion = await Discussion.findById(id);
   if (!discussion) throw new AppError('Discussion not found', 404);
-  
+
   const discussionCreator = discussion.creator || discussion.author;
   if (repo.owner.toString() !== req.user.id && discussionCreator?.toString() !== req.user.id) {
     return res.status(403).json({ message: 'Forbidden' });
@@ -117,7 +117,7 @@ router.put('/:id/replies/:replyId/answer', auth, asyncHandler(async (req, res) =
   if (!replyFound) throw new AppError('Reply not found', 404);
 
   await discussion.save();
-  
+
   const updated = await Discussion.findById(id)
     .populate('creator', 'login avatar_url')
     .populate('replies.author', 'login avatar_url');

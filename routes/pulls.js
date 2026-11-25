@@ -4,7 +4,7 @@ import Repository from '../models/repository.js';
 import Notification from '../models/notification.js';
 import BranchProtection from '../models/branchProtection.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
-import { successResponse, errorResponse } from '../utils/responseFormatter.js';
+import { successResponse } from '../utils/responseFormatter.js';
 import { asyncHandler, AppError } from '../utils/errorHandler.js';
 import { recordContribution } from '../services/userService.js';
 import Comment from '../models/comment.js';
