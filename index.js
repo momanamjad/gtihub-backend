@@ -42,16 +42,22 @@ import { errorHandler } from './utils/errorHandler.js';
 const app = express();
 const server = http.createServer(app);
 
+import jwt from 'jsonwebtoken';
 // CORS Configuration
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
   : ['http://localhost:3000', 'http://localhost:5000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175', 'https://github-kappa-two.vercel.app'];
 
+const corsOriginValidator = (origin, callback) => {
+  if (!origin || allowedOrigins.includes(origin)) {
+    return callback(null, true);
+  }
+  return callback(new Error('Not allowed by CORS'));
+};
+
 const io = new Server(server, {
   cors: {
-    origin: (origin, callback) => {
-      callback(null, true);
-    },
+    origin: corsOriginValidator,
     credentials: true,
     methods: ["GET", "POST"]
   }
@@ -59,9 +65,29 @@ const io = new Server(server, {
 
 const userSockets = new Map();
 
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '');
+  if (!token || !process.env.JWT_SECRET) {
+    return next(new Error('Unauthorized'));
+  }
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.userId = decoded.user.id;
+    next();
+  } catch {
+    next(new Error('Unauthorized'));
+  }
+});
+
 io.on('connection', (socket) => {
-  socket.on('register', (userId) => {
-    userSockets.set(userId, socket.id);
+  if (socket.userId) {
+    userSockets.set(socket.userId.toString(), socket.id);
+  }
+
+  socket.on('register', () => {
+    if (socket.userId) {
+      userSockets.set(socket.userId.toString(), socket.id);
+    }
   });
 
   socket.on('disconnect', () => {
@@ -82,35 +108,32 @@ notificationEmitter.on('newNotification', (notification) => {
   }
 });
 
+app.set('trust proxy', 1);
+
 app.use(cors({
-  origin: (origin, callback) => {
-    callback(null, true); // Allow all origins dynamically
-  },
+  origin: corsOriginValidator,
   credentials: true,
 }));
 
 // Fix wildcard CORS pre-flight to use configured origins
 app.options(/.*/, cors({
-  origin: (origin, callback) => {
-    callback(null, true); // Allow all origins dynamically
-  },
+  origin: corsOriginValidator,
   credentials: true,
 }));
 
 // Gzip compression — must be before routes
 app.use(compression({ level: 6, threshold: 1024 }));
 
-// Cache-Control for GET API responses (public profiles & GET routes cached with stale-while-revalidate)
+// Cache-Control for GET API responses (private by default; opt-in public caching only for anonymous public endpoints)
 app.use('/api/', (req, res, next) => {
   if (req.method === 'GET') {
-    // Public user profile GET /api/auth/user/:username can be cached briefly (15s edge, 60s swr)
-    if (req.path.match(/^\/auth\/user\/[^\/]+$/)) {
-      res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
-    } else if (req.path.startsWith('/auth/') || req.path.includes('/profile') || req.path.includes('/users/me')) {
-      // Private auth and self-profile routes should not be cached
-      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    } else {
+    const hasAuth = Boolean(req.headers.authorization || req.cookies?.accessToken);
+    if (!hasAuth && req.path === '/repos/public/explore') {
       res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+    } else if (!hasAuth && req.path.match(/^\/auth\/user\/[^\/]+$/)) {
+      res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+    } else {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     }
   } else {
     res.set('Cache-Control', 'no-store');
@@ -163,6 +186,10 @@ const authLimiter = rateLimit({
 app.use('/api/', generalLimiter);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/forgot-password', authLimiter);
+app.use('/api/auth/reset-password', authLimiter);
+app.use('/api/auth/google-signin', authLimiter);
+app.use('/api/auth/refresh', authLimiter);
 
 // Cookie Parser Middleware
 app.use(cookieParser());

@@ -6,6 +6,7 @@ import PullRequest from '../models/pullRequest.js';
 import FileNode from '../models/fileNode.js';
 import { successResponse } from '../utils/responseFormatter.js';
 import { asyncHandler } from '../utils/errorHandler.js';
+import { assertRepoAccess } from '../utils/repoAccess.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const router = express.Router();
@@ -31,7 +32,8 @@ router.post('/chat', optionalAuth, asyncHandler(async (req, res) => {
   let fileContentContext = "";
 
   if (repoId) {
-    const repo = await Repository.findById(repoId).populate('owner', 'login');
+    await assertRepoAccess(repoId, req.user?.id);
+    const repo = await Repository.findById(repoId).populate('owner', 'login').lean();
     if (repo) {
       contextInfo += `You are looking at the repository "${repo.owner?.login || 'unknown'}/${repo.name}".\n`;
       contextInfo += `Description: ${repo.description || 'None'}\n`;
