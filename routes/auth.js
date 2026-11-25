@@ -317,8 +317,12 @@ router.post('/google-signin', asyncHandler(async (req, res) => {
   }
 
   const { accessToken, refreshToken } = authService.generateTokens(user.id);
+  user.refreshToken = refreshToken;
+  await user.save();
+
   const userObj = user.toObject();
   delete userObj.password;
+  delete userObj.refreshToken;
 
   setTokenCookies(res, accessToken, refreshToken);
   successResponse(res, { accessToken, refreshToken, user: userObj }, 'Google sign-in successful');

@@ -1,7 +1,12 @@
 import jwt from 'jsonwebtoken';
 import { errorResponse } from '../utils/responseFormatter.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'github_clone_default_jwt_secret_fallback_key';
+const JWT_SECRET = process.env.JWT_SECRET || (
+  process.env.NODE_ENV === 'test' ? 'github_clone_test_jwt_secret' : undefined
+);
+if (!JWT_SECRET) {
+  throw new Error('FATAL: JWT_SECRET environment variable must be set.');
+}
 
 export const auth = (req, res, next) => {
   const token = req.cookies?.accessToken || req.header('x-auth-token') || req.header('authorization')?.replace(/^Bearer\s+/i, '');
