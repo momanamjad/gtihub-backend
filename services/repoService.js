@@ -462,16 +462,19 @@ export const searchRepositories = async ({ q, page = 1, limit = 10, language = n
     dbQuery = dbQuery.find({ $text: { $search: searchString } });
   }
 
-  const repos = await dbQuery
-    .populate('owner', 'login avatar_url')
-    .skip(skip)
-    .limit(limit);
-
   const countQuery = { ...query };
   if (searchString) {
     countQuery.$text = { $search: searchString };
   }
-  const total = await Repository.countDocuments(countQuery);
+
+  const [repos, total] = await Promise.all([
+    dbQuery
+      .populate('owner', 'login avatar_url')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Repository.countDocuments(countQuery)
+  ]);
 
   return { repos, total };
 };
@@ -531,14 +534,17 @@ export const getRepositoryIssues = async (repoId, viewerId, { page = 1, limit = 
   }
 
   const skip = (page - 1) * limit;
-  const issues = await Issue.find({ repository: repoId, state, is_deleted: false })
-    .populate('creator', 'login avatar_url')
-    .populate('assignee', 'login avatar_url')
-    .sort('-created_at')
-    .skip(skip)
-    .limit(limit);
-
-  const total = await Issue.countDocuments({ repository: repoId, state, is_deleted: false });
+  const issueFilter = { repository: repoId, state, is_deleted: false };
+  const [issues, total] = await Promise.all([
+    Issue.find(issueFilter)
+      .populate('creator', 'login avatar_url')
+      .populate('assignee', 'login avatar_url')
+      .sort('-created_at')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Issue.countDocuments(issueFilter)
+  ]);
 
   return { issues, total };
 };

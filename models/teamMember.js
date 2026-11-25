@@ -7,5 +7,6 @@ const teamMemberSchema = new mongoose.Schema({
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 teamMemberSchema.index({ team: 1, user: 1 }, { unique: true });
+teamMemberSchema.index({ user: 1 });
 
 export default mongoose.model('TeamMember', teamMemberSchema);

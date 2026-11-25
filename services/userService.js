@@ -184,13 +184,15 @@ export const updateProfile = async (userId, updates) => {
 export const searchUsers = async ({ q, page = 1, limit = 10 }) => {
   const skip = (page - 1) * limit;
   const escapedQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const users = await User.find({ login: { $regex: escapedQ, $options: 'i' } })
-    .select('login name avatar_url followers_count public_repos_count')
-    .skip(skip)
-    .limit(limit)
-    .lean();
-
-  const total = await User.countDocuments({ login: { $regex: escapedQ, $options: 'i' } });
+  const filter = { login: { $regex: escapedQ, $options: 'i' } };
+  const [users, total] = await Promise.all([
+    User.find(filter)
+      .select('login name avatar_url followers_count public_repos_count')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    User.countDocuments(filter)
+  ]);
 
   return { users, total };
 };
@@ -227,38 +229,44 @@ export const followUser = async (userId, userToFollowId) => {
 
 export const getFollowers = async (userId, { page = 1, limit = 10 }) => {
   const skip = (page - 1) * limit;
-  const followers = await Follower.find({ following: userId })
-    .populate('follower', 'login name avatar_url')
-    .skip(skip)
-    .limit(limit);
-
-  const total = await Follower.countDocuments({ following: userId });
+  const [followers, total] = await Promise.all([
+    Follower.find({ following: userId })
+      .populate('follower', 'login name avatar_url')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Follower.countDocuments({ following: userId })
+  ]);
 
   return { followers, total };
 };
 
 export const getFollowing = async (userId, { page = 1, limit = 10 }) => {
   const skip = (page - 1) * limit;
-  const following = await Follower.find({ follower: userId })
-    .populate('following', 'login name avatar_url')
-    .skip(skip)
-    .limit(limit);
-
-  const total = await Follower.countDocuments({ follower: userId });
+  const [following, total] = await Promise.all([
+    Follower.find({ follower: userId })
+      .populate('following', 'login name avatar_url')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Follower.countDocuments({ follower: userId })
+  ]);
 
   return { following, total };
 };
 
 export const getNotifications = async (userId, { page = 1, limit = 10 }) => {
   const skip = (page - 1) * limit;
-  const notifications = await Notification.find({ user: userId })
-    .populate('actor', 'login avatar_url')
-    .sort('-created_at')
-    .skip(skip)
-    .limit(limit);
-
-  const total = await Notification.countDocuments({ user: userId });
-  const unread = await Notification.countDocuments({ user: userId, isRead: false });
+  const [notifications, total, unread] = await Promise.all([
+    Notification.find({ user: userId })
+      .populate('actor', 'login avatar_url')
+      .sort('-created_at')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Notification.countDocuments({ user: userId }),
+    Notification.countDocuments({ user: userId, isRead: false })
+  ]);
 
   return { notifications, total, unread };
 };
@@ -280,26 +288,28 @@ export const getActivityFeed = async (userId, { page = 1, limit = 20 }) => {
   const skip = (page - 1) * limit;
 
   // Get followed users
-  const followedRelations = await Follower.find({ follower: userId }).select('following');
+  const followedRelations = await Follower.find({ follower: userId }).select('following').lean();
   const followedUserIds = followedRelations.map(r => r.following);
 
   // Include user's own activity as well
   const targetUserIds = [userId, ...followedUserIds];
 
-  // Retrieve contributions
-  const contributions = await Contribution.find({ user: { $in: targetUserIds } })
-    .populate('user', 'login avatar_url')
-    .populate({
-      path: 'repository',
-      select: 'name owner visibility description forks_count stars_count language',
-      populate: { path: 'owner', select: 'login avatar_url' }
-    })
-    .populate('targetUser', 'login avatar_url')
-    .sort('-created_at')
-    .skip(skip)
-    .limit(limit);
-
-  const total = await Contribution.countDocuments({ user: { $in: targetUserIds } });
+  // Retrieve contributions & total in parallel
+  const [contributions, total] = await Promise.all([
+    Contribution.find({ user: { $in: targetUserIds } })
+      .populate('user', 'login avatar_url')
+      .populate({
+        path: 'repository',
+        select: 'name owner visibility description forks_count stars_count language',
+        populate: { path: 'owner', select: 'login avatar_url' }
+      })
+      .populate('targetUser', 'login avatar_url')
+      .sort('-created_at')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Contribution.countDocuments({ user: { $in: targetUserIds } })
+  ]);
 
   return { feed: contributions, total };
 };

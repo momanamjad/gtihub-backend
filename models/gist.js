@@ -16,4 +16,7 @@ const gistSchema = new mongoose.Schema({
   stars_count: { type: Number, default: 0 }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
+gistSchema.index({ public: 1, created_at: -1 });
+gistSchema.index({ owner: 1, created_at: -1 });
+
 export default mongoose.model('Gist', gistSchema);

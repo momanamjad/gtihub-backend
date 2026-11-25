@@ -13,4 +13,6 @@ const webhookDeliverySchema = new mongoose.Schema({
   duration_ms: { type: Number }
 });
 
+webhookDeliverySchema.index({ webhook: 1, delivered_at: -1 });
+
 export default mongoose.model('WebhookDelivery', webhookDeliverySchema);

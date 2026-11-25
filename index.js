@@ -5,14 +5,11 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import swaggerUi from 'swagger-ui-express';
 import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import http from 'http';
-import { Server } from 'socket.io';
 import { notificationEmitter } from './utils/eventEmitter.js';
 
-import swaggerDocs from './config/swagger.js';
 // Start queue workers only in non-serverless standalone server
 if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   import('./services/webhookQueue.js').catch(() => {});
@@ -40,7 +37,7 @@ import gistsRoutes from './routes/gists.js';
 import { errorHandler } from './utils/errorHandler.js';
 
 const app = express();
-const server = http.createServer(app);
+const server = !process.env.VERCEL ? http.createServer(app) : null;
 
 import jwt from 'jsonwebtoken';
 // CORS Configuration
@@ -55,58 +52,62 @@ const corsOriginValidator = (origin, callback) => {
   return callback(new Error('Not allowed by CORS'));
 };
 
-const io = new Server(server, {
-  cors: {
-    origin: corsOriginValidator,
-    credentials: true,
-    methods: ["GET", "POST"]
-  }
-});
-
-const userSockets = new Map();
-
-io.use((socket, next) => {
-  const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '');
-  if (!token || !process.env.JWT_SECRET) {
-    return next(new Error('Unauthorized'));
-  }
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    socket.userId = decoded.user.id;
-    next();
-  } catch {
-    next(new Error('Unauthorized'));
-  }
-});
-
-io.on('connection', (socket) => {
-  if (socket.userId) {
-    userSockets.set(socket.userId.toString(), socket.id);
-  }
-
-  socket.on('register', () => {
-    if (socket.userId) {
-      userSockets.set(socket.userId.toString(), socket.id);
-    }
-  });
-
-  socket.on('disconnect', () => {
-    for (const [userId, socketId] of userSockets.entries()) {
-      if (socketId === socket.id) {
-        userSockets.delete(userId);
-        break;
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'test' && server) {
+  import('socket.io').then(({ Server }) => {
+    const io = new Server(server, {
+      cors: {
+        origin: corsOriginValidator,
+        credentials: true,
+        methods: ["GET", "POST"]
       }
-    }
-  });
-});
+    });
 
-notificationEmitter.on('newNotification', (notification) => {
-  const recipientId = notification.user.toString();
-  const socketId = userSockets.get(recipientId);
-  if (socketId) {
-    io.to(socketId).emit('notification', notification);
-  }
-});
+    const userSockets = new Map();
+
+    io.use((socket, next) => {
+      const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '');
+      if (!token || !process.env.JWT_SECRET) {
+        return next(new Error('Unauthorized'));
+      }
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        socket.userId = decoded.user.id;
+        next();
+      } catch {
+        next(new Error('Unauthorized'));
+      }
+    });
+
+    io.on('connection', (socket) => {
+      if (socket.userId) {
+        userSockets.set(socket.userId.toString(), socket.id);
+      }
+
+      socket.on('register', () => {
+        if (socket.userId) {
+          userSockets.set(socket.userId.toString(), socket.id);
+        }
+      });
+
+      socket.on('disconnect', () => {
+        for (const [userId, socketId] of userSockets.entries()) {
+          if (socketId === socket.id) {
+            userSockets.delete(userId);
+            break;
+          }
+        }
+      });
+    });
+
+    notificationEmitter.on('newNotification', (notification) => {
+      const recipientId = notification.user.toString();
+      const socketId = userSockets.get(recipientId);
+      if (socketId) {
+        io.to(socketId).emit('notification', notification);
+      }
+    });
+  }).catch(() => {});
+}
 
 app.set('trust proxy', 1);
 
@@ -289,19 +290,39 @@ const checkDocsAuth = (req, res, next) => {
 
 app.use('/api/docs', checkDocsAuth);
 
-// Swagger Documentation
-app.use('/api/docs', swaggerUi.serve);
-app.get('/api/docs', swaggerUi.setup(swaggerDocs, {
-  customCss: '.swagger-ui { max-width: 1400px; margin: 0 auto; }',
-  swaggerOptions: {
-    persistAuthorization: true,
-  },
-}));
-app.get('/api/docs/swagger-ui.css', (req, res) => {
+// Swagger Documentation (lazy-loaded on demand to avoid serverless cold-start overhead)
+let swaggerHandlersPromise = null;
+const getSwaggerHandlers = () => {
+  if (!swaggerHandlersPromise) {
+    swaggerHandlersPromise = Promise.all([
+      import('swagger-ui-express'),
+      import('./config/swagger.js')
+    ]).then(([uiMod, docsMod]) => ({
+      swaggerUi: uiMod.default,
+      swaggerDocs: docsMod.default,
+    }));
+  }
+  return swaggerHandlersPromise;
+};
+
+app.use('/api/docs', async (req, res, next) => {
+  const { swaggerUi } = await getSwaggerHandlers();
+  return swaggerUi.serve[0](req, res, () => swaggerUi.serve[1](req, res, next));
+});
+app.get('/api/docs', async (req, res, next) => {
+  const { swaggerUi, swaggerDocs } = await getSwaggerHandlers();
+  return swaggerUi.setup(swaggerDocs, {
+    customCss: '.swagger-ui { max-width: 1400px; margin: 0 auto; }',
+    swaggerOptions: { persistAuthorization: true },
+  })(req, res, next);
+});
+app.get('/api/docs/swagger-ui.css', async (req, res) => {
+  const { swaggerUi } = await getSwaggerHandlers();
   res.setHeader('Content-Type', 'text/css');
   res.send(swaggerUi.CSS);
 });
-app.get('/api/docs/swagger-ui-bundle.js', (req, res) => {
+app.get('/api/docs/swagger-ui-bundle.js', async (req, res) => {
+  const { swaggerUi } = await getSwaggerHandlers();
   res.setHeader('Content-Type', 'application/javascript');
   res.send(swaggerUi.JS);
 });

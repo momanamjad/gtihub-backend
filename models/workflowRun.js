@@ -8,4 +8,6 @@ const workflowRunSchema = new mongoose.Schema({
   logs: { type: [String], default: [] }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
+workflowRunSchema.index({ repository: 1, created_at: -1 });
+
 export default mongoose.model('WorkflowRun', workflowRunSchema);
